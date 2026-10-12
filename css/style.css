@@ -1,0 +1,14 @@
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: #05040f;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+body { display: flex; align-items: center; justify-content: center; }
+#game { display: block; touch-action: none; }
+#mute {
+  position: fixed; top: max(10px, env(safe-area-inset-top)); right: 10px;
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 3px solid #3b2414; background: #fff7e0; font-size: 20px;
+  cursor: pointer; z-index: 2;
+}
