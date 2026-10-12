@@ -7,6 +7,25 @@ for (const n of ['wc', 'rotfighter', 'crotte', 'ventouse', 'tir_vert', 'tir_viol
   IMG[n] = new Image(); IMG[n].src = `assets/vaisseaux/${n}.webp`;
 }
 const ok = n => IMG[n].complete && IMG[n].naturalWidth > 0;
+
+// Personnages (planche 1) et leurs portraits ronds pour la radio
+export const PERSO = {}, PORTRAIT = {};
+for (const n of ['lucas', 'lucas_rire', 'roteur', 'gazou', 'r2wc', 'pqr', 'soldat', 'hanpopo']) {
+  PERSO[n] = new Image(); PERSO[n].src = `assets/persos/${n}.webp`;
+}
+for (const n of ['lucas', 'gazou', 'hanpopo', 'pqr', 'r2wc', 'roteur', 'soldat']) {
+  PORTRAIT[n] = new Image(); PORTRAIT[n].src = `assets/portraits/${n}.webp`;
+}
+export const ready = im => !!im && im.complete && im.naturalWidth > 0;
+// personnage debout : pieds en (x, y), haut de h, retourné si flip
+export function figure(ctx, n, x, y, h, flip = false) {
+  const im = PERSO[n];
+  if (!ready(im)) return;
+  const w = h * im.naturalWidth / im.naturalHeight;
+  ctx.save(); ctx.translate(x, y); if (flip) ctx.scale(-1, 1);
+  ctx.drawImage(im, -w / 2, -h, w, h);
+  ctx.restore();
+}
 // dessine l'image n centrée en (x, y), haute de h, décalée de dy une fois tournée
 export function sprite(ctx, n, x, y, h, rot = 0, flash = 0, dy = 0) {
   const im = IMG[n], w = h * im.naturalWidth / im.naturalHeight;

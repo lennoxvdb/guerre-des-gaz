@@ -142,6 +142,11 @@ BACKGROUND: plain pure white (#FFFFFF), no ground, no shadow, no white sticker b
 NO text, NO letters, NO numbers, NO logos.
 ```
 
+**Faite** (2026-10-12, acceptée par Gemini) : `planches/planche1_personnages.jpg` →
+`assets/persos/` (lucas, lucas_rire, roteur, gazou, r2wc, pqr, soldat, hanpopo) ; portraits ronds
+de la radio : `python tools/portraits.py` → `assets/portraits/` (cadrage du visage dans `FACES`).
+Utilisés : radio, écran titre (Lucas face à Dark Roteur), écran de défaite (Dark Roteur).
+
 Correspondance : 1-2 Lucas · 3 Dark Roteur · 4 Maître Gazou · 5 R2-WC · 6 P-QR ·
 7 soldat de Dark Roteur · 8 Han Popo.
 
@@ -204,8 +209,8 @@ Fichiers : `src/main.js` (jeu : vagues, tirs, bonus, croiseur, écrans), `src/dr
 images de `assets/` et formes de secours), `src/audio.js` (prouts et rots fabriqués dans le code).
 Prototype fait (2026-10-12) : un doigt pour bouger, tir automatique, 5 vagues puis le
 Croiseur-Ventouse, en boucle de plus en plus dur ; bonus tir triple / bouclier / R2-WC ;
-3 cœurs ; record sauvegardé ; messages radio de Gazou, P-QR, R2-WC, Han Popo (portraits = ronds
-de couleur en attendant la planche 1).
+3 cœurs ; record sauvegardé ; messages radio avec portraits (Gazou, P-QR, R2-WC, Han Popo,
+Dark Roteur).
 
 ## Les premières étapes
 

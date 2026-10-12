@@ -72,7 +72,9 @@ let best = 0;
 try { best = Number(localStorage.getItem('gdg_record')) || 0; } catch {}
 
 function say(who, text, color, dur = 3.6) { radio = { who, text, color, t: dur }; }
-const GAZOU = '#6fc24a', PQR = '#e8b830', R2C = '#3f7fe0', HAN = '#c97a3a';
+// qui parle à la radio : portrait + couleur du nom
+const GAZOU = { p: 'gazou', c: '#4f9a2e' }, PQR = { p: 'pqr', c: '#d0588a' }, R2C = { p: 'r2wc', c: '#3f7fe0' },
+  HAN = { p: 'hanpopo', c: '#b0602a' }, ROTEUR = { p: 'roteur', c: '#7b3fa0' };
 
 function newGame() {
   player = { x: W / 2, y: H - 160, r: 15, lives: 3, inv: 1.5, fireT: 0, triple: 0, shield: 0, r2: 0, r2T: 0, tilt: 0, vx: 0 };
@@ -113,6 +115,7 @@ function startWave() {
     case 5:
       add(0.8, cruiserBoss);
       say('P-QR', '« Oh non, un croiseur ! Nous sommes perdus, perdus, PERDUS ! »', PQR);
+      add(4.2, () => say('Dark Roteur', '« BUUURP… Plus personne ne rira dans cette galaxie ! »', ROTEUR));
       break;
   }
 }
@@ -447,10 +450,14 @@ function drawRadio() {
   ctx.save(); ctx.globalAlpha = a;
   ctx.beginPath(); ctx.roundRect(14, y, W - 28, h, 16);
   ctx.fillStyle = 'rgba(255,247,224,0.94)'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = D.OUT; ctx.stroke();
-  // portrait provisoire : un rond de la couleur du personnage
-  ctx.beginPath(); ctx.arc(52, y + h / 2, 26, 0, Math.PI * 2);
-  ctx.fillStyle = radio.color; ctx.fill(); ctx.stroke();
-  ctx.font = FONT(16); ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = radio.color;
+  // portrait rond
+  const cy = y + h / 2, im = D.PORTRAIT[radio.color.p];
+  ctx.save(); ctx.beginPath(); ctx.arc(52, cy, 28, 0, Math.PI * 2);
+  ctx.fillStyle = '#d8f0ff'; ctx.fill(); ctx.clip();
+  if (D.ready(im)) ctx.drawImage(im, 52 - 30, cy - 30, 60, 60);
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(52, cy, 28, 0, Math.PI * 2); ctx.lineWidth = 4; ctx.strokeStyle = D.OUT; ctx.stroke();
+  ctx.font = FONT(16); ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = radio.color.c;
   ctx.fillText(radio.who, 92, y + 12);
   ctx.font = FONT(19, 700); ctx.fillStyle = '#3b2414';
   lines.forEach((l, i) => ctx.fillText(l, 92, y + 34 + i * 24));
@@ -520,17 +527,23 @@ function drawTitle(t) {
   ctx.font = 'italic ' + FONT(19, 700); ctx.textAlign = 'center'; ctx.fillStyle = '#d9c9ff';
   ctx.fillText('Il y a longtemps, dans une galaxie', W / 2, cy + 104);
   ctx.fillText('très, très gazeuse…', W / 2, cy + 130);
-  D.toilet(ctx, W / 2, H * 0.62 + Math.sin(t * 2) * 10, 1.8, t, Math.sin(t * 1.3) * 0.12);
+  // Lucas face à Dark Roteur, en bas
+  const fh = Math.min(290, H * 0.27), fy = H - 40, tapY = fy - fh - 50;
+  D.figure(ctx, 'lucas_rire', 125, fy - Math.abs(Math.sin(t * 3)) * 6, fh);
+  D.figure(ctx, 'roteur', W - 150, fy, fh * 0.95);
+  // le chasseur-WC entre le sous-titre et « Touche l'écran »
+  const top = cy + 145, gap = tapY - 30 - top;
+  D.toilet(ctx, W / 2, top + gap / 2 + Math.sin(t * 2) * 6, Math.min(1.4, gap / 100), t, Math.sin(t * 1.3) * 0.12);
   ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 4);
-  textOut('Touche l\'écran pour décoller !', W / 2, H * 0.8, 28, '#ffffff', 'center', 6);
+  textOut('Touche l\'écran pour décoller !', W / 2, tapY, 28, '#ffffff', 'center', 6);
   ctx.globalAlpha = 1;
-  if (best) textOut('Record : ' + best, W / 2, H * 0.86, 22, '#ffe08a', 'center', 5);
-  ctx.font = FONT(14, 700); ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  ctx.fillText('Prototype : dessins provisoires', W / 2, H - 24);
+  if (best) textOut('Record : ' + best, W / 2, tapY + 36, 22, '#ffe08a', 'center', 5);
 }
 
 function drawOver() {
   ctx.fillStyle = 'rgba(10,6,25,0.55)'; ctx.fillRect(0, 0, W, H);
+  const rh = Math.min(260, H * 0.24);
+  D.figure(ctx, 'roteur', W / 2, H - 20 + Math.sin(stateT * 5) * 4, rh);
   textOut('Dark Roteur a gagné…', W / 2, H * 0.32, 38, '#c38be8', 'center', 8);
   textOut('…pour cette fois !', W / 2, H * 0.32 + 48, 30, '#ffffff', 'center', 6);
   textOut('Score : ' + score, W / 2, H * 0.48, 40, '#ffffff', 'center', 7);
