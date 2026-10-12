@@ -59,32 +59,34 @@ Puante en visant son unique point faible (le trou de la chasse d'eau !).
 **Le ton** : drôle, pour les enfants, comme Pokepetro. Pas de sang : les ennemis touchés se
 dégonflent ou partent en tourbillonnant.
 
-## Le jeu (proposition)
+## Le jeu (version 2, en 3D comme Starshiprout)
 
-### Idée 1 ⭐ conseillée : bataille spatiale (shoot'em up vertical)
+**Le prototype 2D (bataille spatiale seule, en Canvas) a été jugé « pourri » par l'utilisateur**
+(2026-10-12) : « tu m'as déjà fait 10 fois mieux » (= Starshiprout, en 3D). Il voulait **des
+combats au sabre-gaz** et **des vaisseaux sur la planète**. Ses choix :
+- Sabre-gaz **en 3D vue de dessus comme Starshiprout** (Lucas court, tape, renvoie les tirs, duel
+  contre Dark Roteur).
+- Vaisseaux : **les trois** : bataille en vol au-dessus du sol de la planète, vaisseaux qui
+  attaquent pendant les combats à pied, et **monter dans son vaisseau** en pleine mission.
 
-- Lucas pilote un **chasseur-WC** (un petit vaisseau en forme de toilettes volantes).
-- **Un seul pouce** : on glisse le doigt pour bouger le vaisseau, **il tire tout seul** des
-  rayons-prout.
-- Vagues de chasseurs ennemis (les **Rot-fighters** de Dark Roteur), astéroïdes en crotte,
-  bonus à ramasser (tir triple, bouclier de gaz, R2-WC en renfort).
-- Chaque niveau finit par un **boss** : un croiseur géant, puis l'Étoile Puante.
-- Parties courtes, score à battre : parfait pour le téléphone et pour le partage.
+Ce qui est fait (version 2) :
+- **Mission 1 « Le désert de Sablon »** : à pied au sabre (soldats à ventouse qui tapent, soldats
+  tireurs dont on **renvoie les bulles** avec 🛡, soldats qui tombent du ciel dans des bulles,
+  Rot-fighters qui bombardent avec des **cercles rouges** au sol), puis on **monte dans le
+  chasseur-WC** posé au nord (bouton MONTER) → décollage → **vol au-dessus du désert** (le Faucon
+  de Han Popo aide au début, canons au sol, bonus TIR+ et ❤) → **Croiseur-Ventouse**.
+- **Mission 2 « Le duel du plateau des Rots »** : duel contre Dark Roteur (zone rouge au sol avant
+  chaque coup ; 2 coups parés sur 3 = il est **SONNÉ** ; anneau de rot à parer ; à mi-vie il lance
+  son sabre en boomerang, à renvoyer avec 🛡, et appelle 2 soldats).
+- Mission 3 « L'Étoile Puante » : carte « Bientôt » (station `assets/vaisseaux/etoile.webp` prête).
+- Histoire en **bandes dessinées** avant/après chaque mission (dessins de la planche 1).
+- Méga-Prout (jauge qui se remplit en frappant), mots « POUF ! CLANG ! PING ! », musiques et sons
+  fabriqués dans le code, 3 étoiles par mission, sauvegarde `gdg_save`.
+- Barre du haut « Navigateur / Téléphone Android / Tourner » comme Starshiprout.
 
-### Idée 2 : duels au sabre-gaz
-
-- Combats contre les chevaliers noirs et Dark Roteur : **glisser le doigt** dans la direction
-  indiquée pour parer ou frapper (comme Fruit Ninja en duel).
-- Peut servir de **combat de boss** entre les niveaux de l'idée 1 : on garde les deux.
-
-### Idée 3 : la course de capsules-prout
-
-- Course sur la planète de sable, à bord d'une capsule propulsée au prout : glisser à gauche et
-  à droite, éviter les rochers, ramasser des haricots pour le turbo.
-
-**Mon conseil** : un jeu qui suit l'histoire, avec les **batailles spatiales (idée 1)** comme
-cœur du jeu, et un **duel au sabre-gaz (idée 2)** contre chaque grand méchant. La course (idée 3)
-peut venir plus tard.
+Commandes : joystick (doigt n'importe où sur la gauche) + boutons ⚔ SABRE, 🛡 PARER (garder
+appuyé), 💨 MÉGA-PROUT, 🚀 MONTER. En vol : glisser le doigt. Clavier : flèches/ZQSD/WASD,
+Espace ou J = sabre, Maj ou K = parer, E ou L = Méga-Prout, F ou Entrée = monter, P/Échap = pause.
 
 ## Les dessins
 
@@ -201,16 +203,24 @@ Réponses de l'utilisateur (2026-10-12) :
 - [x] Les noms : on **garde** ceux proposés plus haut.
 - [x] **Web d'abord** (choix par défaut, conseillé), l'appli Android ensuite.
 
-Technique retenue : JavaScript + Canvas 2D **sans bibliothèque** (rien à installer, léger, marche
-hors ligne dans l'appli plus tard). Aperçu : `node tools/serve.mjs` → http://localhost:8791/
-(`?vague=6` pour commencer directement au croiseur).
+Technique (version 2) : **Three.js en local** (`lib/`, copié de Starshiprout), caméra
+orthographique vue de dessus. Aperçu : `node tools/serve.mjs` → http://localhost:8791/
+(dans Claude : configuration « guerre-des-gaz » du `.claude/launch.json` de lucas_soldat).
+Pour tester : `?mission=1`, `?mission=2`, `?vol` (directement le vol) ; robot qui joue tout seul :
+charger `tools/bot.js` dans la console (crochet `window.gdgBot` dans `src/main.js`).
 
-Fichiers : `src/main.js` (jeu : vagues, tirs, bonus, croiseur, écrans), `src/draw.js` (dessins :
-images de `assets/` et formes de secours), `src/audio.js` (prouts et rots fabriqués dans le code).
-Prototype fait (2026-10-12) : un doigt pour bouger, tir automatique, 5 vagues puis le
-Croiseur-Ventouse, en boucle de plus en plus dur ; bonus tir triple / bouclier / R2-WC ;
-3 cœurs ; record sauvegardé ; messages radio avec portraits (Gazou, P-QR, R2-WC, Han Popo,
-Dark Roteur).
+Fichiers :
+- `src/main.js` : démarrage, aperçu téléphone, commandes, HUD, écrans, caméra, enchaînement.
+- `src/engine/gfx.js` (style cartoon, particules, mots BD, dessins à plat/debout), `audio.js`.
+- `src/entities/fighter.js` : **un seul modèle 3D** (KayKit « Knight », CC0, `assets/3d/trooper.glb`)
+  repeint par shader : Lucas (combinaison blanche/verte, cheveux, sabre vert), soldats (violet-gris,
+  casque de scaphandrier à masque à gaz, pistolet à bulles ou ventouse), Dark Roteur (violet foncé,
+  cape, casque à piques et tuba, sabre violet). Animations du modèle : coups d'épée, parade, etc.
+- `src/world/world.js` : désert de Sablon (dunes, dômes, rochers, plantes, Faucon posé, amis en
+  dessins debout, chasseur-WC posé) et plateau des Rots (colonnes, geysers).
+- `src/game/foot.js` (combat à pied + Dark Roteur), `flight.js` (vol : les vaisseaux sont des
+  dessins vus de dessus posés à plat à hauteur ALT, collisions « comme sur l'écran »),
+  `missions.js` (histoire, réglages `DIFF`, déroulé des missions), `common.js`.
 
 ## Les premières étapes
 

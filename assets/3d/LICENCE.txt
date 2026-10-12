@@ -1,0 +1,4 @@
+trooper.glb = "Knight" du KayKit Adventurers Character Pack 1.0
+par Kay Lousberg (www.kaylousberg.com) — licence CC0 (domaine public).
+https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0
+Repeint et équipé dans le code (src/entities/fighter.js) : Lucas, les soldats, Dark Roteur.

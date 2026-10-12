@@ -1,590 +1,480 @@
-// La Guerre des Gaz : prototype de la bataille spatiale.
-import { unlock, sfx, muted, setMuted } from './audio.js';
-import * as D from './draw.js';
+// La Guerre des Gaz : démarrage, écrans, commandes, caméra, enchaînement des missions.
+import * as THREE from 'three';
+import { loadTextures, TEX, Particles, puffTex, glowTex, Words } from './engine/gfx.js';
+import { unlock, sfx, playMusic, muted, setMuted } from './engine/audio.js';
+import { loadKnight, Fighter, SaberTrail } from './entities/fighter.js';
+import { World } from './world/world.js';
+import { FootMode } from './game/foot.js';
+import { FlightMode, FLIGHT_OFF } from './game/flight.js';
+import { MISSIONS, DIFF, footSablon, flightSablon, duelPlateau } from './game/missions.js';
 
-const cv = document.getElementById('game');
-const ctx = cv.getContext('2d');
-const W = 540;
-let H = 960;
-const FONT = (s, w = 900) => `${w} ${s}px "Arial Rounded MT Bold", "Trebuchet MS", "Segoe UI", sans-serif`;
-const rand = (a, b) => a + Math.random() * (b - a);
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const $ = (id) => document.getElementById(id);
+const touchDevice = matchMedia('(pointer: coarse)').matches;
 
-// ---------- écran : largeur fixe, hauteur qui s'adapte au téléphone ----------
-let scale = 1;
+// ---------------- sauvegarde ----------------
+const save = { stars: {}, seen: {} };
+try { Object.assign(save, JSON.parse(localStorage.getItem('gdg_save') || '{}')); } catch { /* rien */ }
+const persist = () => { try { localStorage.setItem('gdg_save', JSON.stringify(save)); } catch { /* rien */ } };
+
+// ---------------- 3D ----------------
+const canvas = $('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 300);
+const puffs = new Particles(scene, puffTex, 900);
+const glows = new Particles(scene, glowTex, 600); // pas « additif » : les lueurs gardent leur couleur sur le sable
+const words = new Words(scene);
+
+// ---------------- aperçu navigateur / téléphone ----------------
+const body = document.body, gameEl = $('game'), device = $('device'), stage = $('stage');
+const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
+  || (touchDevice && Math.min(screen.width, screen.height) < 820);
+if (native) body.classList.add('native');
+const view = { mode: 'browser', landscape: false };
+try { Object.assign(view, JSON.parse(localStorage.getItem('gdg_view') || '{}')); } catch { /* rien */ }
+let GW = 1, GH = 1;
 function resize() {
-  const vw = innerWidth, vh = innerHeight;
-  H = Math.round(clamp(W * vh / vw, 760, 1170));
-  scale = Math.min(vw / W, vh / H);
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  cv.style.width = W * scale + 'px';
-  cv.style.height = H * scale + 'px';
-  cv.width = Math.round(W * scale * dpr);
-  cv.height = Math.round(H * scale * dpr);
-  ctx.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
-  if (player) { player.x = clamp(player.x, 30, W - 30); player.y = clamp(player.y, 90, H - 50); }
+  GW = gameEl.offsetWidth; GH = gameEl.offsetHeight;
+  if (!GW || !GH) return;
+  renderer.setSize(GW, GH, false);
+  gameEl.classList.toggle('narrow', GW < 560);
 }
-addEventListener('resize', resize);
+function applyView() {
+  const phone = view.mode === 'phone' && !native;
+  body.classList.toggle('phone', phone);
+  body.classList.toggle('landscape', phone && view.landscape);
+  document.querySelectorAll('#devbar [data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === view.mode));
+  $('rotateBtn').style.display = phone ? '' : 'none';
+  if (phone) {
+    const W = view.landscape ? 915 : 412, H = view.landscape ? 412 : 915;
+    gameEl.style.width = W + 'px'; gameEl.style.height = H + 'px';
+    const s = Math.min(1, (stage.clientWidth - 30) / (W + 24), (stage.clientHeight - 30) / (H + 24));
+    device.style.transform = `scale(${s})`;
+  } else { gameEl.style.width = ''; gameEl.style.height = ''; device.style.transform = ''; }
+  resize();
+  try { localStorage.setItem('gdg_view', JSON.stringify(view)); } catch { /* rien */ }
+}
+document.querySelectorAll('#devbar [data-mode]').forEach((b) => b.addEventListener('click', () => { view.mode = b.dataset.mode; applyView(); }));
+$('rotateBtn').addEventListener('click', () => { view.landscape = !view.landscape; applyView(); });
+addEventListener('resize', applyView);
 
-// ---------- fond de l'espace : étoiles + nébuleuses vertes et violettes ----------
-const TILE = 1200;
-let seed = 7;
-const srand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-const stars = [0.25, 0.55, 1].map((depth, i) => Array.from({ length: [70, 40, 22][i] }, () => ({
-  x: srand() * W, y: srand() * TILE, r: (0.6 + srand()) * depth * 1.6, depth,
-})));
-const neb = document.createElement('canvas');
-neb.width = W; neb.height = TILE;
-{
-  const n = neb.getContext('2d');
-  const cols = ['120,255,90', '170,80,255', '90,200,255', '200,90,220'];
-  for (let i = 0; i < 9; i++) {
-    const x = srand() * W, y = srand() * TILE, r = 140 + srand() * 220, c = cols[i % cols.length];
-    for (const dy of [-TILE, 0, TILE]) {
-      const g = n.createRadialGradient(x, y + dy, 0, x, y + dy, r);
-      g.addColorStop(0, `rgba(${c},0.20)`); g.addColorStop(1, `rgba(${c},0)`);
-      n.fillStyle = g; n.fillRect(0, 0, W, TILE);
-    }
-  }
-}
-let bgOff = 0;
-function drawBackground() {
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#0b0820'); g.addColorStop(1, '#140a2a');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  const ny = (bgOff * 0.15) % TILE;
-  ctx.drawImage(neb, 0, ny - TILE); ctx.drawImage(neb, 0, ny);
-  ctx.fillStyle = '#fff';
-  for (const layer of stars) for (const s of layer) {
-    const y = (s.y + bgOff * s.depth) % TILE;
-    if (y > H + 4) continue;
-    ctx.globalAlpha = 0.4 + s.depth * 0.6;
-    ctx.fillRect(s.x, y, s.r, s.r * (1 + s.depth * 1.5));
-  }
-  ctx.globalAlpha = 1;
+// ---------------- caméra ----------------
+const OFF_FOOT = new THREE.Vector3(16, 19, 16);
+const cam = { target: new THREE.Vector3(0, 1, 0), elev: 0, zoom: 1 };
+let shakeAmt = 0, stopT = 0, zoomNow = 1;
+const aspect = () => GW / GH;
+const footHalf = () => Math.max(7.4, 5.4 / aspect());
+const flightHalf = () => Math.max(9.5, 6.3 / aspect());
+function placeCamera(dt) {
+  zoomNow += (cam.zoom - zoomNow) * Math.min(1, dt * 3);
+  const off = OFF_FOOT.clone().normalize().lerp(FLIGHT_OFF.clone().normalize(), cam.elev).normalize().multiplyScalar(80);
+  camera.position.copy(cam.target).add(off);
+  if (shakeAmt > 0) camera.position.add(new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5)).multiplyScalar(shakeAmt * 0.9));
+  camera.lookAt(cam.target);
+  const half = (footHalf() + (flightHalf() - footHalf()) * cam.elev) * zoomNow, a = aspect();
+  camera.left = -half * a; camera.right = half * a; camera.top = half; camera.bottom = -half;
+  camera.updateProjectionMatrix();
 }
 
-// ---------- état du jeu ----------
-let state = 'title', stateT = 0, gameT = 0;
-let player = null, shots = [], eshots = [], enemies = [], parts = [], pickups = [], texts = [];
-let score = 0, wave = 0, waveQueue = [], waveWait = 0, banner = null, radio = null, shake = 0, newBest = false;
-let best = 0;
-try { best = Number(localStorage.getItem('gdg_record')) || 0; } catch {}
-
-function say(who, text, color, dur = 3.6) { radio = { who, text, color, t: dur }; }
-// qui parle à la radio : portrait + couleur du nom
-const GAZOU = { p: 'gazou', c: '#4f9a2e' }, PQR = { p: 'pqr', c: '#d0588a' }, R2C = { p: 'r2wc', c: '#3f7fe0' },
-  HAN = { p: 'hanpopo', c: '#b0602a' }, ROTEUR = { p: 'roteur', c: '#7b3fa0' };
-
-function newGame() {
-  player = { x: W / 2, y: H - 160, r: 15, lives: 3, inv: 1.5, fireT: 0, triple: 0, shield: 0, r2: 0, r2T: 0, tilt: 0, vx: 0 };
-  shots = []; eshots = []; enemies = []; parts = []; pickups = []; texts = [];
-  score = 0; wave = START_WAVE; waveQueue = []; waveWait = 0; gameT = 0; banner = null; shake = 0; newBest = false;
-  say('Maître Gazou', '« Tirer tout seul, ton vaisseau fait. Bouger, toi tu dois. »', GAZOU, 4.5);
-  startWave();
-}
-
-// ---------- vagues d'ennemis ----------
-const diff = () => 1 + wave * 0.07;
-// pour tester : ?vague=6 commence au croiseur
-const START_WAVE = Math.max(0, (Number(new URLSearchParams(location.search).get('vague')) || 1) - 1);
-
-function startWave() {
-  const k = wave % 6, loop = Math.floor(wave / 6);
-  banner = { text: k === 5 ? 'Attention : Croiseur-Ventouse !' : `Vague ${wave + 1}`, t: 2.2 };
-  waveQueue = [];
-  const add = (delay, fn) => waveQueue.push({ at: gameT + delay, fn });
-  switch (k) {
-    case 0:
-      for (let i = 0; i < 5 + loop; i++) add(i * 0.4, () => fighter(W * (0.18 + 0.16 * (i % 5)), 'dive', { wob: 40 }));
-      break;
-    case 1:
-      for (let i = 0; i < 5 + loop; i++) add(i * 0.75, rock);
-      break;
-    case 2:
-      for (let i = 0; i < 7; i++) { const o = i - 3; add(Math.abs(o) * 0.25, () => fighter(W / 2 + o * 62, 'dive', { wob: 0 })); }
-      break;
-    case 3:
-      for (let i = 0; i < 5; i++) add(i * 0.32, () => fighter(-40, 'swoop', { dir: 1, y0: 110 }));
-      for (let i = 0; i < 5; i++) add(2.4 + i * 0.32, () => fighter(W + 40, 'swoop', { dir: -1, y0: 190 }));
-      break;
-    case 4:
-      for (let i = 0; i < 3; i++) add(i * 0.5, () => fighter(W * (0.25 + 0.25 * i), 'hover', { ty: 170 + (i % 2) * 80 }));
-      for (let i = 0; i < 3 + loop; i++) add(2 + i * 1.1, rock);
-      break;
-    case 5:
-      add(0.8, cruiserBoss);
-      say('P-QR', '« Oh non, un croiseur ! Nous sommes perdus, perdus, PERDUS ! »', PQR);
-      add(4.2, () => say('Dark Roteur', '« BUUURP… Plus personne ne rira dans cette galaxie ! »', ROTEUR));
-      break;
-  }
-}
-
-function fighter(x, mode, opt = {}) {
-  const d = diff();
-  enemies.push({
-    kind: 'fighter', mode, ...opt, x, y: mode === 'swoop' ? opt.y0 - 60 : -40, x0: x, r: 26,
-    hp: Math.round(2 * d), t: 0, ph: rand(0, 6), rot: 0, flash: 0,
-    fireT: rand(1.2, 2.8), score: mode === 'hover' ? 150 : 100,
-  });
-}
-
-function rock() {
-  const d = Math.min(diff(), 1.6);
-  enemies.push({
-    kind: 'rock', x: rand(40, W - 40), y: -50, vx: rand(-35, 35), vy: rand(110, 165) * d,
-    r: 30, hp: 4, t: 0, rot: rand(0, 6), spin: rand(-2, 2), flash: 0, score: 50,
-  });
-}
-
-function cruiserBoss() {
-  const hp = Math.round(70 * diff());
-  enemies.push({
-    kind: 'cruiser', x: W / 2, y: -80, r: 80, hp, maxHp: hp, t: 0, rot: 0, flash: 0,
-    fanT: 2.5, spawnT: 6, score: 1000, boss: true,
-  });
-}
-
-// zone touchable de chaque ennemi
-function hits(e, x, y, r) {
-  if (e.kind === 'cruiser') {
-    const dx = x - e.x, dy = y - e.y;
-    if (Math.abs(dx) < 16 + r && dy > -240 - r && dy < -30) return true;
-    return (dx / (68 + r)) ** 2 + ((dy - 12) / (46 + r)) ** 2 < 1;
-  }
-  return Math.hypot(x - e.x, y - e.y) < e.r + r;
-}
-
-function enemyShot(x, y, ang, speed) {
-  eshots.push({ x, y, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed });
-}
-
-function updateEnemy(e, dt) {
-  e.t += dt;
-  e.flash -= dt;
-  if (e.dying !== undefined) {
-    e.dying -= dt;
-    e.x += e.vx * dt; e.y += e.vy * dt; e.rot += e.spin * dt;
-    if (Math.random() < (e.boss ? 0.9 : 0.5)) puff(e.x, e.y, e.boss ? 'big' : 'trail');
-    return e.dying > 0;
-  }
-  const d = diff();
-  if (e.kind === 'fighter') {
-    if (e.mode === 'dive') {
-      e.y += 150 * Math.min(d, 1.5) * dt;
-      e.x = e.x0 + e.wob * Math.sin(e.t * 2.5 + e.ph);
-    } else if (e.mode === 'swoop') {
-      const s = 240 * e.t;
-      e.x = e.x0 + e.dir * s;
-      e.y = e.y0 + 0.0011 * s * s;
-      e.rot = -e.dir * Math.min(0.6, 0.0011 * 2 * s * 0.6);
-    } else if (e.mode === 'hover') {
-      if (e.t > 7.5) e.y += 230 * dt;
-      else if (e.y < e.ty) e.y += 170 * dt;
-      e.x += Math.sin(e.t * 1.3 + e.ph) * 60 * dt;
-    }
-    e.fireT -= dt;
-    if (e.fireT <= 0) {
-      e.fireT = rand(1.8, 3.2) / Math.sqrt(d) * (e.mode === 'hover' ? 0.6 : 1);
-      if (e.y > 30 && e.y < H * 0.6 && (e.mode === 'hover' || Math.random() < 0.55)) {
-        enemyShot(e.x, e.y + 20, Math.atan2(player.y - e.y, player.x - e.x), 200 + 25 * d);
-      }
-    }
-  } else if (e.kind === 'rock') {
-    e.x += e.vx * dt; e.y += e.vy * dt; e.rot += e.spin * dt;
-    if (e.x < 30 || e.x > W - 30) e.vx *= -1;
-  } else if (e.kind === 'cruiser') {
-    if (e.y < 270) e.y += 90 * dt;
-    else {
-      e.x = W / 2 + (W / 2 - 90) * Math.sin((e.t - 3) * 0.55);
-      e.fanT -= dt;
-      if (e.fanT <= 0) {
-        e.fanT = 2.2 / Math.sqrt(d);
-        for (let i = -2; i <= 2; i++) enemyShot(e.x + i * 24, e.y + 50, Math.PI / 2 + i * 0.22, 210);
-      }
-      e.spawnT -= dt;
-      if (e.spawnT <= 0) {
-        e.spawnT = 6.5;
-        for (const o of [-60, 60]) { fighter(e.x + o, 'dive', { wob: 30 }); enemies[enemies.length - 1].y = e.y; }
-      }
-    }
-  }
-  return e.y < H + 80 && e.x > -100 && e.x < W + 100;
-}
-
-function kill(e) {
-  score += e.score;
-  texts.push({ x: e.x, y: e.y, text: '+' + e.score, t: 0.9, color: '#eaffc0' });
-  if (e.boss) {
-    e.dying = 1.8; e.vx = 0; e.vy = 40; e.spin = rand(-1, 1) * 1.5;
-    sfx.big(); shake = 0.8;
-    for (let i = 0; i < 30; i++) puff(e.x + rand(-70, 70), e.y + rand(-220, 50), 'big');
-    banner = { text: 'Croiseur dégonflé !', t: 2.2 };
-    say('Han Popo', '« Pas mal, gamin ! Même mon Faucon Pétulant n\'aurait pas fait mieux. »', HAN);
-    drop(e.x, e.y, true);
-    for (const s of eshots) s.dead = true;
-  } else {
-    // l'ennemi se dégonfle comme un ballon et part en tourbillonnant
-    e.dying = 0.7; const a = rand(0, Math.PI * 2);
-    e.vx = Math.cos(a) * 280; e.vy = Math.sin(a) * 280 - 60; e.spin = rand(10, 16) * (Math.random() < 0.5 ? -1 : 1);
-    sfx.pop();
-    for (let i = 0; i < 6; i++) puff(e.x, e.y, 'pop');
-    if (Math.random() < (e.kind === 'rock' ? 0.07 : 0.13)) drop(e.x, e.y);
-  }
-}
-
-function drop(x, y, sure) {
-  const kinds = ['triple', 'triple', 'shield', 'r2'];
-  pickups.push({ x, y, kind: kinds[Math.floor(Math.random() * kinds.length)], t: 0 });
-  if (sure) pickups.push({ x: x + 50, y, kind: 'r2', t: 0.5 });
-}
-
-// ---------- particules : petits nuages de gaz ----------
-function puff(x, y, type) {
-  if (parts.length > 400) parts.shift();
-  const P = {
-    pop: { c: ['#9be36b', '#c8f59a', '#b58bdc'], v: 120, r: [8, 16], life: 0.6 },
-    trail: { c: ['#a8e57c', '#d8f5b8'], v: 30, r: [5, 10], life: 0.5 },
-    big: { c: ['#9be36b', '#c38be8', '#e0d0f0', '#7fbf4d'], v: 160, r: [18, 36], life: 1.1 },
-    hurt: { c: ['#c38be8', '#8a4fc0', '#f0d8ff'], v: 160, r: [10, 22], life: 0.8 },
-    spark: { c: ['#eaffc0', '#ffffff'], v: 90, r: [3, 6], life: 0.25 },
-    exhaust: { c: ['#8cff6a', '#d4ffb0'], v: 20, r: [4, 8], life: 0.35 },
-  }[type];
-  const a = rand(0, Math.PI * 2), v = rand(0.3, 1) * P.v;
-  parts.push({
-    x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v + (type === 'exhaust' ? 160 : 0),
-    r: rand(...P.r), c: P.c[Math.floor(Math.random() * P.c.length)], t: P.life, max: P.life,
-  });
-}
-
-// ---------- Lucas touché ----------
-function hurt() {
-  if (player.inv > 0) return;
-  if (player.shield > 0) {
-    player.shield = 0; player.inv = 1; sfx.bonk();
-    for (let i = 0; i < 10; i++) puff(player.x, player.y, 'pop');
-    return;
-  }
-  player.lives--; player.inv = 2.2; shake = 0.45; sfx.burp();
-  for (let i = 0; i < 14; i++) puff(player.x, player.y, 'hurt');
-  for (const s of eshots) if (Math.hypot(s.x - player.x, s.y - player.y) < 220) s.dead = true;
-  if (player.lives <= 0) {
-    state = 'over'; stateT = 0;
-    for (let i = 0; i < 30; i++) puff(player.x, player.y, 'big');
-    if (score > best) { best = score; newBest = true; try { localStorage.setItem('gdg_record', String(best)); } catch {} }
-  } else if (player.lives === 1) {
-    say('Maître Gazou', '« Attention, jeune Lucas ! Le Gaz, sentir tu dois. »', GAZOU);
-  }
-}
-
-// ---------- commandes : un seul doigt (ou la souris, ou les flèches) ----------
-let drag = null;
+// ---------------- commandes ----------------
+const input = { move: { x: 0, y: 0 }, drag: { x: 0, y: 0 }, attack: false, block: false, mega: false, action: false };
 const keys = new Set();
-function toLocal(e) {
-  const r = cv.getBoundingClientRect();
-  return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
-}
-cv.addEventListener('pointerdown', e => {
+const KEYS = { attack: ['Space', 'KeyJ'], block: ['ShiftLeft', 'ShiftRight', 'KeyK'], mega: ['KeyE', 'KeyL'], action: ['KeyF', 'Enter'] };
+addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  keys.add(e.code);
   unlock();
-  if (state === 'title' || (state === 'over' && stateT > 1)) { newGame(); state = 'play'; stateT = 0; return; }
-  if (state !== 'play') return;
-  const p = toLocal(e);
-  drag = { id: e.pointerId, fx: p.x, fy: p.y, sx: player.x, sy: player.y };
-  cv.setPointerCapture(e.pointerId);
+  if (KEYS.attack.includes(e.code)) input.attack = true;
+  if (KEYS.mega.includes(e.code)) input.mega = true;
+  if (KEYS.action.includes(e.code)) input.action = true;
+  if ((e.code === 'Escape' || e.code === 'KeyP') && state === 'play') pause();
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
 });
-cv.addEventListener('pointermove', e => {
-  if (!drag || e.pointerId !== drag.id || state !== 'play') return;
-  const p = toLocal(e);
-  // le vaisseau suit le doigt sans être caché dessous
-  player.x = clamp(drag.sx + (p.x - drag.fx) * 1.2, 30, W - 30);
-  player.y = clamp(drag.sy + (p.y - drag.fy) * 1.2, 90, H - 50);
-});
-const endDrag = e => { if (drag && e.pointerId === drag.id) drag = null; };
-cv.addEventListener('pointerup', endDrag);
-cv.addEventListener('pointercancel', endDrag);
-addEventListener('keydown', e => {
-  keys.add(e.key);
-  if ((e.key === ' ' || e.key === 'Enter') && (state === 'title' || (state === 'over' && stateT > 1))) {
-    unlock(); newGame(); state = 'play'; stateT = 0;
-  }
-});
-addEventListener('keyup', e => keys.delete(e.key));
+addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
 
-const muteBtn = document.getElementById('mute');
-const showMute = () => { muteBtn.textContent = muted ? '🔇' : '🔊'; };
-muteBtn.addEventListener('click', () => { unlock(); setMuted(!muted); showMute(); });
+const joy = { on: false, id: null, ox: 0, oy: 0, x: 0, y: 0 };
+const JR = 55;
+let drag = null;
+function local(e) {
+  const r = gameEl.getBoundingClientRect();
+  const s = r.width / gameEl.offsetWidth || 1;
+  return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s, s };
+}
+gameEl.addEventListener('pointerdown', (e) => {
+  unlock();
+  if (state !== 'play' || paused || e.target.closest('button')) return;
+  const p = local(e);
+  if (modeName === 'flight') { drag = { id: e.pointerId, x: p.x, y: p.y }; $('flightHelp').classList.add('hidden'); return; }
+  if (joy.on) return;
+  Object.assign(joy, { on: true, id: e.pointerId, ox: p.x, oy: p.y, x: 0, y: 0 });
+  const j = $('joy'); j.style.left = p.x + 'px'; j.style.top = p.y + 'px'; j.classList.remove('hidden');
+  $('joyKnob').style.transform = '';
+});
+gameEl.addEventListener('pointermove', (e) => {
+  const p = local(e);
+  if (drag && e.pointerId === drag.id) { input.drag.x += p.x - drag.x; input.drag.y -= p.y - drag.y; drag.x = p.x; drag.y = p.y; return; }
+  if (!joy.on || e.pointerId !== joy.id) return;
+  let dx = p.x - joy.ox, dy = p.y - joy.oy;
+  const len = Math.hypot(dx, dy);
+  if (len > JR * 1.5) { // le joystick suit le doigt s'il va trop loin
+    joy.ox += dx / len * (len - JR * 1.5); joy.oy += dy / len * (len - JR * 1.5);
+    $('joy').style.left = joy.ox + 'px'; $('joy').style.top = joy.oy + 'px';
+    dx = p.x - joy.ox; dy = p.y - joy.oy;
+  }
+  const k = Math.min(1, JR / (Math.hypot(dx, dy) || 1));
+  joy.x = dx * k / JR; joy.y = -dy * k / JR;
+  $('joyKnob').style.transform = `translate(${dx * k}px, ${dy * k}px)`;
+});
+const pointerEnd = (e) => {
+  if (drag && e.pointerId === drag.id) drag = null;
+  if (joy.on && e.pointerId === joy.id) { joy.on = false; joy.x = joy.y = 0; $('joy').classList.add('hidden'); }
+};
+gameEl.addEventListener('pointerup', pointerEnd);
+gameEl.addEventListener('pointercancel', pointerEnd);
+
+function holdButton(id, onDown, onUp) {
+  const b = $(id);
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); unlock(); b.classList.add('down'); try { b.setPointerCapture(e.pointerId); } catch { /* rien */ } onDown(); });
+  const up = () => { b.classList.remove('down'); onUp && onUp(); };
+  b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
+}
+let blockBtn = false;
+holdButton('btnAtk', () => { input.attack = true; });
+holdButton('btnBlock', () => { blockBtn = true; }, () => { blockBtn = false; });
+holdButton('btnMega', () => { input.mega = true; });
+holdButton('btnAct', () => { input.action = true; });
+$('pauseBtn').addEventListener('click', () => { sfx.click(); pause(); });
+const showMute = () => { $('muteBtn').textContent = muted ? '🔇' : '🔊'; };
+$('muteBtn').addEventListener('click', () => { unlock(); setMuted(!muted); showMute(); });
 showMute();
 
-// ---------- mise à jour ----------
-function update(dt) {
-  stateT += dt;
-  bgOff += dt * (state === 'play' ? 120 : 60);
-  shake = Math.max(0, shake - dt);
-  if (radio && (radio.t -= dt) <= 0) radio = null;
-  if (banner && (banner.t -= dt) <= 0) banner = null;
+function readInput() {
+  let x = joy.x, y = joy.y;
+  if (keys.has('ArrowLeft') || keys.has('KeyA') || keys.has('KeyQ')) x -= 1;
+  if (keys.has('ArrowRight') || keys.has('KeyD')) x += 1;
+  if (keys.has('ArrowUp') || keys.has('KeyW') || keys.has('KeyZ')) y += 1;
+  if (keys.has('ArrowDown') || keys.has('KeyS')) y -= 1;
+  const l = Math.hypot(x, y);
+  if (l > 1) { x /= l; y /= l; }
+  input.move.x = x; input.move.y = y;
+  input.block = blockBtn || KEYS.block.some((k) => keys.has(k));
+}
+function clearEdges() { input.attack = input.mega = input.action = false; input.drag.x = input.drag.y = 0; }
 
-  for (const p of parts) { p.t -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; }
-  parts = parts.filter(p => p.t > 0);
-  for (const t of texts) { t.t -= dt; t.y -= 50 * dt; }
-  texts = texts.filter(t => t.t > 0);
-  if (state !== 'play') {
-    if (state === 'over' && enemies) {
-      for (const e of enemies) updateEnemy(e, dt * 0.3);
-    }
+// ---------------- HUD ----------------
+const NAMES = { lucas: 'Lucas', lucas_rire: 'Lucas', roteur: 'Dark Roteur', gazou: 'Maître Gazou', hanpopo: 'Han Popo', pqr: 'P-QR', r2wc: 'R2-WC', soldat: 'Soldat' };
+const portrait = (who) => `assets/portraits/${who === 'lucas_rire' ? 'lucas' : who}.webp`;
+let radioT = 0, bannerT = 0, pointerTarget = null;
+const TIPS = {
+  atk: () => touchDevice ? 'Touche ⚔️ pour frapper avec ton sabre-gaz !' : 'Espace (ou ⚔️) pour frapper avec ton sabre-gaz !',
+  block: () => touchDevice ? 'Garde 🛡️ appuyé pour parer et renvoyer les tirs !' : 'Garde Maj (ou 🛡️) appuyé pour parer et renvoyer les tirs !',
+  mega: () => touchDevice ? 'Ta jauge est pleine : touche 💨 !' : 'Ta jauge est pleine : touche E (ou 💨) !',
+};
+const BTN = { atk: 'btnAtk', block: 'btnBlock', mega: 'btnMega' };
+const hud = {
+  hearts(hp, max) { $('hearts').innerHTML = Array.from({ length: max }, (_, i) => `<span class="${i < hp ? '' : 'off'}">❤️</span>`).join(''); },
+  mega(k) { $('megaFill').style.height = Math.round(Math.min(1, k) * 100) + '%'; $('btnMega').classList.toggle('full', k >= 1); },
+  objective(t) { $('objective').textContent = t || ''; },
+  radio(who, text, dur = 3.6) {
+    $('radioImg').src = portrait(who); $('radioName').textContent = NAMES[who] || who; $('radioText').textContent = text;
+    const r = $('radio'); r.classList.remove('hidden'); r.style.animation = 'none'; void r.offsetWidth; r.style.animation = '';
+    radioT = dur + text.length * 0.02;
+    if (who === 'r2wc') sfx.bip();
+  },
+  boss(name, k = 1) {
+    if (!name) { $('bossbar').classList.add('hidden'); return; }
+    $('bossbar').classList.remove('hidden'); $('bossName').textContent = name; $('bossFill').style.width = Math.round(k * 100) + '%';
+    if (modeName === 'flight' && k >= 1) playMusic('boss');
+  },
+  banner(text, dur = 2) { const b = $('banner'); b.textContent = text; b.classList.remove('hidden'); bannerT = dur; },
+  tip(which) {
+    for (const id of Object.values(BTN)) $(id).classList.remove('hl');
+    if (!which) { $('tip').classList.add('hidden'); return; }
+    $(BTN[which]).classList.add('hl');
+    $('tip').textContent = TIPS[which](); $('tip').classList.remove('hidden');
+  },
+  action(label) { $('btnAct').classList.toggle('hidden', !label); if (label) $('actLabel').textContent = label; },
+  pointer(p) { pointerTarget = p ? p.clone() : null; },
+};
+function resetHud() {
+  hud.objective(''); hud.boss(null); hud.tip(null); hud.action(null); hud.pointer(null);
+  $('radio').classList.add('hidden'); $('banner').classList.add('hidden'); radioT = bannerT = 0;
+}
+function flash(a = 0.8) { const f = $('flash'); f.style.transition = 'none'; f.style.opacity = a; void f.offsetWidth; f.style.transition = 'opacity .5s'; f.style.opacity = 0; }
+
+// ---------------- contexte partagé avec les modes de jeu ----------------
+const ctx = {
+  scene, camera, puffs, glows, words, hud, input, cam, diff: DIFF, world: null,
+  shake(a) { shakeAmt = Math.max(shakeAmt, a); },
+  hitstop(t) { stopT = Math.max(stopT, t); },
+  aspect, flightHalf,
+  dragScale: () => (camera.right - camera.left) / GW * 1.35,
+};
+
+// ---------------- écrans ----------------
+let state = 'loading', paused = false, mode = null, modeName = null, mission = null, world = null;
+let titleHero = null, titleTrail = null, storyCb = null;
+function screen(html, cls = '') {
+  $('screens').innerHTML = `<div class="screen ${cls}">${html}</div>`;
+  return $('screens').firstElementChild;
+}
+function noScreen() { $('screens').innerHTML = ''; }
+function clearScene() {
+  if (mode) { mode.dispose(); mode = null; }
+  if (titleHero) { scene.remove(titleHero.root); titleTrail.dispose(scene); titleHero = null; }
+  if (world) { world.dispose(); world = null; }
+  puffs.clear(); glows.clear(); words.clear();
+  modeName = null;
+}
+function setWorld(theme) {
+  world = new World(scene, theme);
+  ctx.world = world;
+}
+
+function title() {
+  clearScene();
+  state = 'title'; paused = false;
+  $('hud').classList.add('hidden');
+  setWorld('sablon');
+  titleHero = new Fighter('lucas', 2.0);
+  titleHero.yaw = Math.PI * 0.25;
+  scene.add(titleHero.root);
+  titleTrail = new SaberTrail(scene, 0x8fff5a);
+  cam.target.set(0, 1.4, 0); cam.elev = 0; cam.zoom = 0.42; zoomNow = 0.42;
+  world.follow(cam.target);
+  playMusic('menu');
+  const el = screen(`
+    <div class="logo">La Guerre<br>des Gaz</div>
+    <div></div>
+    <div class="row" style="flex-direction:column;align-items:center;gap:12px">
+      <div class="tag">Que le Gaz soit avec toi !</div>
+      <button class="btn big" id="playBtn">▶ JOUER</button>
+    </div>
+    <div class="ver">Version 2 — dessins Gemini, modèle 3D KayKit (CC0)</div>`);
+  el.id = 'title';
+  $('playBtn').onclick = () => { unlock(); sfx.click(); missionsScreen(); };
+}
+
+function missionsScreen() {
+  state = 'menu';
+  const cards = MISSIONS.map((m) => {
+    const st = save.stars[m.id] || 0;
+    const img = m.icon === 'lucas' ? 'assets/persos/lucas.webp' : m.icon === 'roteur' ? 'assets/persos/roteur.webp' : 'assets/persos/pqr.webp';
+    return `<button class="card ${m.soon ? 'soon' : ''}" data-id="${m.id}">
+      <img src="${img}" alt=""><b>${m.id}. ${m.name}</b><p>${m.desc}</p>
+      <div class="stars">${m.soon ? 'Bientôt' : [1, 2, 3].map((i) => (i <= st ? '⭐' : '☆')).join('')}</div></button>`;
+  }).join('');
+  screen(`<h2>Choisis ta mission</h2><div class="cards">${cards}</div><button class="btn grey" id="backBtn">◀ Retour</button>`, 'dim');
+  document.querySelectorAll('.card').forEach((c) => c.addEventListener('click', () => {
+    const m = MISSIONS.find((x) => x.id === Number(c.dataset.id));
+    if (m.soon) return;
+    sfx.click(); startMission(m);
+  }));
+  $('backBtn').onclick = () => { sfx.click(); title(); };
+}
+
+// une page de bande dessinée après l'autre ; on touche pour avancer
+function story(lines, done) {
+  state = 'story';
+  let i = 0, typing = null;
+  const el = screen('', '');
+  el.id = 'story';
+  const show = () => {
+    const L = lines[i];
+    const side = L.who && L.who.startsWith('lucas') ? 'left' : 'right';
+    const img = L.who ? `<img class="who ${side}" src="assets/persos/${L.who}.webp" alt="">` : '';
+    el.innerHTML = `${img}<div class="bubble ${L.who ? '' : 'narr'}">${L.who ? `<b style="color:${L.who === 'roteur' ? '#7b3fa0' : '#2f7a2a'}">${NAMES[L.who]}</b>` : ''}<p></p><span class="next">▶</span></div>
+      <button class="btn grey skip">Passer ⏩</button>`;
+    const p = el.querySelector('p');
+    let n = 0;
+    clearInterval(typing);
+    typing = setInterval(() => { n += 2; p.textContent = L.text.slice(0, n); if (n >= L.text.length) { clearInterval(typing); typing = null; } }, 22);
+    el.querySelector('.skip').onclick = (e) => { e.stopPropagation(); clearInterval(typing); sfx.click(); done(); };
+    if (L.who === 'roteur') sfx.burp(); else if (L.who === 'r2wc') sfx.bip(); else sfx.click();
+  };
+  el.onclick = () => {
+    if (typing) { clearInterval(typing); typing = null; el.querySelector('p').textContent = lines[i].text; return; }
+    i++;
+    if (i >= lines.length) done(); else show();
+  };
+  show();
+}
+
+function startMission(m, opts = {}) {
+  clearScene();
+  mission = m;
+  setWorld(m.theme);
+  cam.zoom = 1; zoomNow = 1; cam.elev = 0;
+  const start = m.id === 1 ? new THREE.Vector3(0, 0, 9) : new THREE.Vector3(0, 0, 7);
+  cam.target.copy(start).setY(1);
+  world.follow(start);
+  $('hud').classList.add('hidden');
+  const go = () => { noScreen(); opts.flight ? startFlight({ startPos: world.wcSpot.clone(), hp: DIFF.hp, mega: 0, skipIntro: true }) : startFoot(start); };
+  if (opts.retry) go();
+  else { playMusic('menu'); story(m.intro, go); }
+}
+
+function startFoot(start) {
+  resetHud();
+  $('hud').classList.remove('hidden', 'flight');
+  state = 'play'; paused = false;
+  modeName = 'foot';
+  const m = mission;
+  mode = new FootMode(ctx, m.id === 1
+    ? { script: footSablon, heroPos: start, radius: 30 }
+    : { script: duelPlateau, heroPos: start, radius: 18 });
+  playMusic(m.music);
+}
+
+function startFlight(o) {
+  if (mode) { mode.dispose(); mode = null; }
+  if (world.wc) world.wc.visible = false;
+  resetHud();
+  $('hud').classList.remove('hidden'); $('hud').classList.add('flight');
+  $('flightHelp').classList.toggle('hidden', !touchDevice);
+  state = 'play'; paused = false;
+  modeName = 'flight';
+  mode = new FlightMode(ctx, { script: flightSablon, ...o });
+  playMusic('flight');
+}
+
+function onResult(r) {
+  if (r.type === 'board') {
+    const hp = mode.hero.hp, mega = mode.hero.mega;
+    startFlight({ startPos: world.wcSpot.clone(), hp, mega });
     return;
   }
-  gameT += dt;
-
-  // Lucas
-  const p = player;
-  let kx = 0, ky = 0;
-  if (keys.has('ArrowLeft') || keys.has('q') || keys.has('a')) kx--;
-  if (keys.has('ArrowRight') || keys.has('d')) kx++;
-  if (keys.has('ArrowUp') || keys.has('z') || keys.has('w')) ky--;
-  if (keys.has('ArrowDown') || keys.has('s')) ky++;
-  const px = p.x;
-  p.x = clamp(p.x + kx * 480 * dt, 30, W - 30);
-  p.y = clamp(p.y + ky * 480 * dt, 90, H - 50);
-  p.vx = p.vx * 0.8 + ((p.x - px) / Math.max(dt, 0.001)) * 0.2;
-  p.tilt = clamp(p.vx / 2500, -0.3, 0.3);
-  p.inv -= dt; p.triple -= dt; p.shield -= dt; p.r2 -= dt;
-  if (Math.random() < 0.6) puff(p.x + rand(-9, 9), p.y + 40, 'exhaust');
-
-  // tir automatique
-  p.fireT -= dt;
-  if (p.fireT <= 0) {
-    p.fireT = 0.13;
-    shots.push({ x: p.x, y: p.y - 34, vx: 0, vy: -900 });
-    if (p.triple > 0) {
-      shots.push({ x: p.x - 12, y: p.y - 26, vx: -190, vy: -880 });
-      shots.push({ x: p.x + 12, y: p.y - 26, vx: 190, vy: -880 });
-    }
-    sfx.shoot();
-  }
-  if (p.r2 > 0) {
-    p.r2T -= dt;
-    if (p.r2T <= 0) { p.r2T = 0.26; const r = r2Pos(); shots.push({ x: r.x, y: r.y - 14, vx: 0, vy: -850 }); }
-  }
-
-  for (const s of shots) {
-    s.x += s.vx * dt; s.y += s.vy * dt;
-    if (s.y < -30) { s.dead = true; continue; }
-    for (const e of enemies) {
-      if (e.dying !== undefined || !hits(e, s.x, s.y, 6)) continue;
-      s.dead = true; e.flash = 0.08; e.hp--;
-      puff(s.x, s.y, 'spark');
-      if (e.kind !== 'fighter') sfx.bonk();
-      if (e.hp <= 0) kill(e);
-      break;
-    }
-  }
-  shots = shots.filter(s => !s.dead);
-
-  // vagues
-  while (waveQueue.length && waveQueue[0].at <= gameT) waveQueue.shift().fn();
-  enemies = enemies.filter(e => updateEnemy(e, dt));
-  if (!waveQueue.length && !enemies.some(e => e.dying === undefined)) {
-    waveWait += dt;
-    if (waveWait > 1.4) { waveWait = 0; wave++; startWave(); }
-  }
-
-  // collisions avec Lucas
-  for (const e of enemies) {
-    if (e.dying !== undefined || !hits(e, p.x, p.y, p.r)) continue;
-    if (p.inv <= 0 || p.shield > 0) { hurt(); if (e.kind !== 'cruiser') { e.hp = 0; kill(e); } }
-  }
-  for (const s of eshots) {
-    s.x += s.vx * dt; s.y += s.vy * dt;
-    if (s.y > H + 20 || s.y < -20 || s.x < -20 || s.x > W + 20) s.dead = true;
-    else if (!s.dead && Math.hypot(s.x - p.x, s.y - p.y) < p.r + 7) { s.dead = true; hurt(); }
-  }
-  eshots = eshots.filter(s => !s.dead);
-
-  // bonus
-  for (const b of pickups) {
-    b.t += dt;
-    const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy);
-    if (dist < 140) { b.x += dx / dist * 300 * dt; b.y += dy / dist * 300 * dt; }
-    else { b.y += 100 * dt; b.x += Math.sin(b.t * 2) * 30 * dt; }
-    if (dist < 38) {
-      b.dead = true;
-      if (b.kind === 'triple') p.triple = 10;
-      if (b.kind === 'shield') p.shield = 9;
-      if (b.kind === 'r2') { p.r2 = 12; sfx.bip(); say('R2-WC', '« Bip bip bouuu… PROUT ! »', R2C, 2.5); }
-      else sfx.pickup();
-      texts.push({ x: p.x, y: p.y - 50, text: D.BONUS[b.kind].name, t: 1.3, color: D.BONUS[b.kind].color });
-    }
-    if (b.y > H + 40) b.dead = true;
-  }
-  pickups = pickups.filter(b => !b.dead);
+  if (r.type === 'dead') return gameOver();
+  if (r.type === 'win') return win();
 }
 
-function r2Pos() {
-  return { x: player.x + Math.cos(gameT * 2.4) * 52, y: player.y + 14 + Math.sin(gameT * 2.4) * 18 };
+function win() {
+  const hp = modeName === 'flight' ? mode.ship.hp : mode.hero.hp;
+  const stars = hp >= DIFF.hp * 0.66 ? 3 : hp >= DIFF.hp * 0.33 ? 2 : 1;
+  save.stars[mission.id] = Math.max(save.stars[mission.id] || 0, stars);
+  persist();
+  state = 'outro';
+  $('hud').classList.add('hidden');
+  playMusic('win'); sfx.win();
+  story(mission.outro, () => {
+    state = 'result';
+    const next = MISSIONS.find((x) => x.id === mission.id + 1 && !x.soon);
+    screen(`<h2>Mission réussie !</h2>
+      <div class="bigstars">${[1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('')}</div>
+      <img class="portrait" src="assets/persos/lucas_rire.webp" alt="">
+      <div class="row">${next ? '<button class="btn" id="nextBtn">Mission suivante ▶</button>' : ''}<button class="btn alt" id="menuBtn">Missions</button></div>
+      ${next ? '' : '<p class="sub">La suite (l\'attaque de l\'Étoile Puante) arrive bientôt !</p>'}`, 'dim');
+    if (next) $('nextBtn').onclick = () => { sfx.click(); startMission(next); };
+    $('menuBtn').onclick = () => { sfx.click(); clearScene(); title(); missionsScreen(); };
+  });
 }
 
-// ---------- affichage ----------
-function textOut(text, x, y, size, fill, align = 'center', lw = 6) {
-  ctx.font = FONT(size); ctx.textAlign = align; ctx.textBaseline = 'middle';
-  ctx.lineJoin = 'round'; ctx.lineWidth = lw; ctx.strokeStyle = D.OUT;
-  ctx.strokeText(text, x, y); ctx.fillStyle = fill; ctx.fillText(text, x, y);
+function gameOver() {
+  state = 'over';
+  const inFlight = modeName === 'flight';
+  $('hud').classList.add('hidden');
+  playMusic(null);
+  screen(`<h2>Lucas est K.O. !</h2>
+    <img class="portrait" src="assets/persos/roteur.webp" alt="">
+    <p class="sub">Dark Roteur rigole… mais le Gaz est encore avec toi !</p>
+    <div class="row"><button class="btn" id="retryBtn">${inFlight ? 'Recommencer le vol' : 'Réessayer'}</button><button class="btn grey" id="menuBtn">Missions</button></div>`, 'dim');
+  $('retryBtn').onclick = () => { sfx.click(); startMission(mission, { retry: true, flight: inFlight }); };
+  $('menuBtn').onclick = () => { sfx.click(); clearScene(); title(); missionsScreen(); };
 }
 
-function wrap(text, maxW, size) {
-  ctx.font = FONT(size, 700);
-  const words = text.split(' '), lines = [];
-  let cur = '';
-  for (const w of words) {
-    const test = cur ? cur + ' ' + w : w;
-    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; } else cur = test;
-  }
-  if (cur) lines.push(cur);
-  return lines;
+function pause() {
+  if (state !== 'play' || paused) return;
+  paused = true;
+  screen(`<h2>Pause</h2><div class="row" style="flex-direction:column">
+    <button class="btn" id="resumeBtn">▶ Continuer</button>
+    <button class="btn alt" id="restartBtn">↻ Recommencer</button>
+    <button class="btn grey" id="quitBtn">Missions</button></div>`, 'dim');
+  $('resumeBtn').onclick = () => { sfx.click(); paused = false; noScreen(); };
+  $('restartBtn').onclick = () => { sfx.click(); startMission(mission, { retry: true, flight: modeName === 'flight' }); };
+  $('quitBtn').onclick = () => { sfx.click(); clearScene(); title(); missionsScreen(); };
 }
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 
-function drawRadio() {
-  if (!radio) return;
-  const a = Math.min(1, radio.t * 3);
-  const lines = wrap(radio.text, W - 150, 19);
-  const h = 44 + lines.length * 24, y = 92;
-  ctx.save(); ctx.globalAlpha = a;
-  ctx.beginPath(); ctx.roundRect(14, y, W - 28, h, 16);
-  ctx.fillStyle = 'rgba(255,247,224,0.94)'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = D.OUT; ctx.stroke();
-  // portrait rond
-  const cy = y + h / 2, im = D.PORTRAIT[radio.color.p];
-  ctx.save(); ctx.beginPath(); ctx.arc(52, cy, 28, 0, Math.PI * 2);
-  ctx.fillStyle = '#d8f0ff'; ctx.fill(); ctx.clip();
-  if (D.ready(im)) ctx.drawImage(im, 52 - 30, cy - 30, 60, 60);
-  ctx.restore();
-  ctx.beginPath(); ctx.arc(52, cy, 28, 0, Math.PI * 2); ctx.lineWidth = 4; ctx.strokeStyle = D.OUT; ctx.stroke();
-  ctx.font = FONT(16); ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = radio.color.c;
-  ctx.fillText(radio.who, 92, y + 12);
-  ctx.font = FONT(19, 700); ctx.fillStyle = '#3b2414';
-  lines.forEach((l, i) => ctx.fillText(l, 92, y + 34 + i * 24));
-  ctx.restore();
-}
-
-function drawHUD() {
-  textOut(String(score), 18, 34, 30, '#ffffff', 'left', 6);
-  for (let i = 0; i < 3; i++) D.heart(ctx, 30 + i * 30, 70, 1.3, i < player.lives ? '#ff5a6e' : '#4a3a55');
-  // bonus en cours : petite jauge
-  let bx = 120;
-  for (const k of ['triple', 'shield', 'r2']) {
-    const left = player[k], max = { triple: 10, shield: 9, r2: 12 }[k];
-    if (left <= 0) continue;
-    ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(bx, 64, 70, 10);
-    ctx.fillStyle = D.BONUS[k].color; ctx.fillRect(bx, 64, 70 * left / max, 10);
-    ctx.strokeStyle = D.OUT; ctx.lineWidth = 2; ctx.strokeRect(bx, 64, 70, 10);
-    bx += 80;
-  }
-  const boss = enemies.find(e => e.boss && e.dying === undefined && e.y > 0);
-  if (boss) {
-    const y = H - 26;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(40, y, W - 80, 14);
-    ctx.fillStyle = '#c38be8'; ctx.fillRect(40, y, (W - 80) * boss.hp / boss.maxHp, 14);
-    ctx.strokeStyle = D.OUT; ctx.lineWidth = 3; ctx.strokeRect(40, y, W - 80, 14);
-  }
-}
-
-function drawWorld(t) {
-  for (const p of parts) {
-    ctx.globalAlpha = Math.max(0, p.t / p.max) * 0.85;
-    ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1.6 - p.t / p.max * 0.6), 0, Math.PI * 2);
-    ctx.fillStyle = p.c; ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-  for (const b of pickups) D.capsule(ctx, b.x, b.y, b.kind, b.t);
-  for (const s of shots) D.shotGreen(ctx, s.x, s.y, Math.atan2(s.vx, -s.vy));
-  for (const e of enemies) {
-    const sc = e.dying !== undefined ? Math.max(0.05, e.dying / (e.boss ? 1.8 : 0.7)) : 1;
-    const fl = e.flash > 0 ? 1 : 0;
-    if (e.kind === 'fighter') D.burpFighter(ctx, e.x, e.y, sc, e.rot, fl);
-    else if (e.kind === 'rock') D.poop(ctx, e.x, e.y, sc, e.rot, fl);
-    else D.cruiser(ctx, e.x, e.y, 0.4 + sc * 0.6, e.rot, fl, t);
-  }
-  if (player && state === 'play') {
-    if (player.r2 > 0) { const r = r2Pos(); D.r2(ctx, r.x, r.y, t); }
-    if (player.inv <= 0 || Math.floor(t * 12) % 2) D.toilet(ctx, player.x, player.y, 1, t, player.tilt);
-    if (player.shield > 0) {
-      ctx.globalAlpha = 0.3 + 0.1 * Math.sin(t * 8) * (player.shield < 2 ? 3 : 1);
-      ctx.beginPath(); ctx.arc(player.x, player.y, 50, 0, Math.PI * 2);
-      ctx.fillStyle = '#5ee0ff'; ctx.fill(); ctx.globalAlpha = 0.8;
-      ctx.lineWidth = 3; ctx.strokeStyle = '#bff4ff'; ctx.stroke(); ctx.globalAlpha = 1;
-    }
-  }
-  for (const s of eshots) D.shotPurple(ctx, s.x, s.y, t, Math.atan2(-s.vx, s.vy) + Math.PI);
-  for (const x of texts) {
-    ctx.globalAlpha = Math.min(1, x.t * 2);
-    textOut(x.text, x.x, x.y, 22, x.color, 'center', 5);
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawTitle(t) {
-  const cy = H * 0.3;
-  textOut('La Guerre', W / 2, cy - 40, 66, '#b6ff7a', 'center', 10);
-  textOut('des Gaz', W / 2, cy + 34, 66, '#b6ff7a', 'center', 10);
-  ctx.font = 'italic ' + FONT(19, 700); ctx.textAlign = 'center'; ctx.fillStyle = '#d9c9ff';
-  ctx.fillText('Il y a longtemps, dans une galaxie', W / 2, cy + 104);
-  ctx.fillText('très, très gazeuse…', W / 2, cy + 130);
-  // Lucas face à Dark Roteur, en bas
-  const fh = Math.min(290, H * 0.27), fy = H - 40, tapY = fy - fh - 50;
-  D.figure(ctx, 'lucas_rire', 125, fy - Math.abs(Math.sin(t * 3)) * 6, fh);
-  D.figure(ctx, 'roteur', W - 150, fy, fh * 0.95);
-  // le chasseur-WC entre le sous-titre et « Touche l'écran »
-  const top = cy + 145, gap = tapY - 30 - top;
-  D.toilet(ctx, W / 2, top + gap / 2 + Math.sin(t * 2) * 6, Math.min(1.4, gap / 100), t, Math.sin(t * 1.3) * 0.12);
-  ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 4);
-  textOut('Touche l\'écran pour décoller !', W / 2, tapY, 28, '#ffffff', 'center', 6);
-  ctx.globalAlpha = 1;
-  if (best) textOut('Record : ' + best, W / 2, tapY + 36, 22, '#ffe08a', 'center', 5);
-}
-
-function drawOver() {
-  ctx.fillStyle = 'rgba(10,6,25,0.55)'; ctx.fillRect(0, 0, W, H);
-  const rh = Math.min(260, H * 0.24);
-  D.figure(ctx, 'roteur', W / 2, H - 20 + Math.sin(stateT * 5) * 4, rh);
-  textOut('Dark Roteur a gagné…', W / 2, H * 0.32, 38, '#c38be8', 'center', 8);
-  textOut('…pour cette fois !', W / 2, H * 0.32 + 48, 30, '#ffffff', 'center', 6);
-  textOut('Score : ' + score, W / 2, H * 0.48, 40, '#ffffff', 'center', 7);
-  textOut(newBest ? 'Nouveau record !' : 'Record : ' + best, W / 2, H * 0.55, 28, '#ffe08a', 'center', 6);
-  if (stateT > 1) {
-    ctx.globalAlpha = 0.65 + 0.35 * Math.sin(stateT * 4);
-    textOut('Touche pour rejouer', W / 2, H * 0.72, 30, '#b6ff7a', 'center', 6);
-    ctx.globalAlpha = 1;
-  }
-}
-
-function draw(t) {
-  ctx.save();
-  if (shake > 0) ctx.translate(rand(-1, 1) * shake * 14, rand(-1, 1) * shake * 14);
-  drawBackground();
-  if (state !== 'title') drawWorld(t);
-  ctx.restore();
-  if (state === 'title') drawTitle(t);
-  if (state === 'play') {
-    drawHUD();
-    if (banner) {
-      ctx.globalAlpha = Math.min(1, banner.t * 2);
-      textOut(banner.text, W / 2, H * 0.42, banner.text.length > 14 ? 32 : 46, '#ffffff', 'center', 8);
-      ctx.globalAlpha = 1;
-    }
-    drawRadio();
-  }
-  if (state === 'over') drawOver();
-}
-
-// ---------- boucle ----------
-let last = performance.now();
+// ---------------- boucle ----------------
+let last = performance.now(), T = 0, kataT = 0, kataI = 0;
+const _p = new THREE.Vector3(), _q = new THREE.Vector3();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  let dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  update(dt);
-  draw(now / 1000);
+  const real = dt;
+  if (stopT > 0) { stopT -= real; dt *= 0.08; }
+  if (paused) dt = 0;
+  T += dt;
+  shakeAmt = Math.max(0, shakeAmt - real * 1.6);
+
+  if (state === 'play' && mode && !paused) {
+    readInput();
+    if (window.gdgBot) window.gdgBot(input, mode, modeName); // robot de test (tools/bot.js)
+    const r = mode.update(dt);
+    clearEdges();
+    if (r) onResult(r);
+  } else clearEdges();
+
+  // l'écran titre : Lucas s'entraîne au sabre
+  if (titleHero) {
+    kataT -= dt;
+    if (kataT <= 0) {
+      const seq = ['atk1', 'atk2', 'atk3', 'idle', 'spin', 'idle', 'block'];
+      const n = seq[kataI++ % seq.length];
+      if (n === 'idle' || n === 'block') { titleHero.setBase(n); titleHero.stopAction(); kataT = 1.2; }
+      else { titleHero.setBase('idle'); kataT = titleHero.play(n, 1.3, 0.85) + 0.15; sfx.swing(); }
+    }
+    titleHero.update(dt);
+    titleHero.setSaberOn(1);
+    titleHero.saberEnds(_p, _q); titleTrail.push(_p, _q, !!titleHero.action);
+    titleHero.yaw = Math.PI * 0.25 + Math.sin(T * 0.4) * 0.3;
+  }
+
+  if (world) world.update(dt, T);
+  puffs.update(dt); glows.update(dt); words.update(dt);
+  placeCamera(real);
+
+  // HUD : radio, bannière, flèche vers l'objectif
+  if (radioT > 0 && !paused) { radioT -= real; if (radioT <= 0) $('radio').classList.add('hidden'); }
+  if (bannerT > 0 && !paused) { bannerT -= real; if (bannerT <= 0) $('banner').classList.add('hidden'); }
+  const ptr = $('pointer');
+  if (pointerTarget && modeName === 'foot' && mode && mode.hero && Math.hypot(mode.hero.pos.x - pointerTarget.x, mode.hero.pos.z - pointerTarget.z) > 5) {
+    _p.copy(mode.hero.pos).setY(1).project(camera); _q.copy(pointerTarget).project(camera);
+    const ang = Math.atan2(-(_q.y - _p.y) * GH, (_q.x - _p.x) * GW);
+    const cx = (_p.x + 1) / 2 * GW + Math.cos(ang) * 90, cy = (1 - _p.y) / 2 * GH + Math.sin(ang) * 90;
+    ptr.style.left = cx + 'px'; ptr.style.top = cy + 'px'; ptr.style.transform = `rotate(${ang}rad)`;
+    ptr.classList.remove('hidden');
+  } else ptr.classList.add('hidden');
+
+  renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
-resize();
-requestAnimationFrame(frame);
 
-// pour les tests dans la console
-window.gdg = { get state() { return state; }, get player() { return player; }, get enemies() { return enemies; }, get wave() { return wave; } };
+// ---------------- démarrage ----------------
+const IMAGES = {};
+for (const n of ['wc', 'rotfighter', 'ventouse', 'etoile', 'faucon', 'crotte', 'tir_vert', 'tir_violet', 'bonus']) IMAGES[n === 'rotfighter' ? 'rot' : n] = `assets/vaisseaux/${n}.webp`;
+for (const n of ['lucas', 'lucas_rire', 'roteur', 'gazou', 'r2wc', 'pqr', 'soldat', 'hanpopo']) IMAGES[n] = `assets/persos/${n}.webp`;
+
+applyView();
+requestAnimationFrame(frame);
+(async () => {
+  let a = 0, b = 0;
+  const prog = () => { $('loadFill').style.width = Math.round((a * 0.6 + b * 0.4) * 100) + '%'; };
+  await Promise.all([
+    loadTextures(IMAGES, (k) => { a = k; prog(); }),
+    loadKnight().then(() => { b = 1; prog(); }),
+    document.fonts ? document.fonts.load('40px "Luckiest Guy"') : null,
+  ]);
+  $('loading').classList.add('hidden');
+  title();
+  // ?mission=2 ou ?vol pour tester directement
+  const q = new URLSearchParams(location.search);
+  if (q.has('mission')) startMission(MISSIONS[Number(q.get('mission')) - 1], { retry: true });
+  if (q.has('vol')) { mission = MISSIONS[0]; startMission(mission, { retry: true, flight: true }); }
+})();
+
+window.gdg = { get mode() { return mode; }, get state() { return state; }, input, ctx };
