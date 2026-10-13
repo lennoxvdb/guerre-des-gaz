@@ -8,7 +8,7 @@ Set-Location $root
 $env:JAVA_HOME = "$env:USERPROFILE\.jdks\jdk-21.0.12.1+1"
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 $sig = "$env:USERPROFILE\lucas-soldat-signature"
-$pw = (Get-Content "$sig\mot-de-passe.txt" -Raw).Trim()
+$pw = Get-Content "$sig\mot-de-passe.txt" -Raw
 $env:KEYSTORE_FILE = "$sig\lucas-soldat.jks"
 $env:KEYSTORE_PASSWORD = $pw
 $env:KEY_PASSWORD = $pw
