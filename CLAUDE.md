@@ -233,3 +233,20 @@ Fichiers :
 5. Ajouter les niveaux, les bonus, les boss, le duel au sabre-gaz et l'histoire entre les
    niveaux.
 6. Mettre en ligne la version web, puis l'appli Android.
+
+## Publication (GitHub, Android)
+
+- Dépôt public : https://github.com/lennoxvdb/guerre-des-gaz (branche `main`).
+- Jeu en ligne (GitHub Pages, servi directement depuis `main`, racine ; `.nojekyll`) :
+  https://lennoxvdb.github.io/guerre-des-gaz/ — chaque envoi sur `main` met le site à jour.
+- Appli : Capacitor 8 (`android/`, appId `com.lennoxvdb.guerredesgaz`, nom « La Guerre des Gaz »),
+  plein écran + écran toujours allumé (`MainActivity.java`), icône et écran de démarrage faits par
+  `python tools/make_icons.py` (visage de Lucas qui rit / Lucas et Dark Roteur).
+- Fabriquer l'APK : commit d'abord, puis `powershell -ExecutionPolicy Bypass -File tools\build_apk.ps1`
+  → `publication/guerre-des-gaz.apk` (pas dans git), version `1.0.<nombre de commits>`.
+  Le script ne rend pas la main tant que Gradle tourne en fond : `android\gradlew.bat --stop`.
+- Signature : **même clé que Starshiprout**, HORS du projet (`%USERPROFILE%\lucas-soldat-signature`,
+  ne jamais afficher le mot de passe). Garder cette clé : sans elle, impossible de mettre à jour l'appli.
+- Puis : `gh release create v1.0.N publication/guerre-des-gaz.apk --repo lennoxvdb/guerre-des-gaz …`
+- Version 1.0.5 publiée le 2026-10-13 : https://github.com/lennoxvdb/guerre-des-gaz/releases/tag/v1.0.5
+- Pas encore de mises à jour automatiques dans l'appli (Starshiprout en a, avec `@capgo/capacitor-updater`).
