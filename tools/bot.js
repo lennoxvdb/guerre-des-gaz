@@ -20,8 +20,16 @@ window.gdgBot = (input, mode, name) => {
     if (h.mega >= 1) input.mega = true;
     input.action = true;
   } else if (name === 'flight') {
-    const p = mode.ship, t = mode.t;
-    input.move.x = Math.sin(t * 0.9) * 0.8 - p.x * 0.05; input.move.y = (-mode.Yh * 0.55 - p.y) * 0.3;
+    // il se place sous l'ennemi le plus proche et s'écarte des tirs, des kamikazes et de la ventouse
+    const p = mode.ship;
+    let tx = 0, best = 1e9;
+    for (const e of mode.enemies) if (!e.dead && e.kind !== 'turret' && e.dying === undefined) { const d = Math.abs(e.x - p.x) + Math.max(0, e.y - p.y) * 0.2; if (d < best) { best = d; tx = e.x; } }
+    let mx = (tx - p.x) * 0.5, my = (-mode.Yh * 0.55 - p.y) * 0.4;
+    const flee = (x, y, r, k) => { const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy); if (d < r && d > 0.01) { mx += dx / d * k * (r - d); my += dy / d * k * (r - d) * 0.5; } };
+    for (const s of mode.eshots) flee(s.x, s.y, 3.2, 1.6);
+    for (const e of mode.enemies) if (!e.dead && e.kind !== 'turret' && e.dying === undefined) flee(e.x, e.y, e.kind === 'boss' ? 6 : 3.5, 1.4);
+    if (mode.bossE && ['aim', 'plunge'].includes(mode.bossE.phase)) mx += (p.x - mode.bossE.x > 0 ? 1 : -1) * 3;
+    const l = Math.hypot(mx, my); input.move.x = l > 1 ? mx / l : mx; input.move.y = l > 1 ? my / l : my;
     if (p.mega >= 1 && mode.bossE) input.mega = true;
   }
 };
