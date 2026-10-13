@@ -232,3 +232,10 @@ body.phone #game.narrow #bossbar { top: 124px; }
 #game.narrow #radio:not(.hidden) ~ #bossbar { top: 190px; }
 body.phone #game.narrow #radio:not(.hidden) ~ #bossbar { top: 214px; }
 #game.narrow #controls { transform: scale(.9); transform-origin: bottom right; }
+
+/* message de mise à jour */
+#toast {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 45; max-width: 90%;
+  background: var(--yellow); color: var(--ink); border: 3px solid var(--ink); border-radius: 14px;
+  padding: 8px 14px; font-size: 15px; text-align: center; box-shadow: 0 4px 0 var(--ink); animation: pop .3s ease-out;
+}

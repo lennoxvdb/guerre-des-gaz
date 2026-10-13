@@ -1,0 +1,99 @@
+# À chaque envoi sur GitHub :
+#  1. le jeu est mis en ligne sur GitHub Pages (jouable dans le navigateur + source des mises à jour automatiques)
+#  2. (bouton « Run workflow » seulement) l'appli Android est fabriquée, signée et publiée dans « Releases ».
+#     Il faut d'abord ranger la clé dans les secrets du dépôt (KEYSTORE_BASE64, KEYSTORE_PASSWORD).
+#     Sinon, l'APK se fabrique sur le PC : tools/build_apk.ps1
+name: Publier le jeu
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: publier
+  cancel-in-progress: false
+
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Numéro de version (nombre d'envois)
+        run: |
+          N=$(git rev-list --count HEAD)
+          echo "VERSION_NAME=1.0.$N" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$N" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Préparer le jeu
+        run: |
+          node tools/build_www.mjs "$VERSION_NAME"
+          mkdir site
+          cp -r www/. site/
+          (cd www && zip -qr ../site/update.zip .)
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  android:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Numéro de version (nombre d'envois)
+        run: |
+          N=$(git rev-list --count HEAD)
+          echo "VERSION_NAME=1.0.$N" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$N" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Outils
+        run: npm ci
+      - name: Préparer le jeu
+        run: |
+          node tools/build_www.mjs "$VERSION_NAME"
+          npx cap sync android
+      - name: Fabriquer l'appli signée
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: lucassoldat
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/cle.jks"
+          export KEYSTORE_FILE="$RUNNER_TEMP/cle.jks"
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease bundleRelease --no-daemon -q
+          cp app/build/outputs/apk/release/app-release.apk ../guerre-des-gaz.apk
+          cp app/build/outputs/bundle/release/app-release.aab ../guerre-des-gaz.aab
+      - name: Publier dans Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION_NAME" guerre-des-gaz.apk guerre-des-gaz.aab \
+            --title "La Guerre des Gaz $VERSION_NAME" \
+            --notes "Appli Android : télécharge **guerre-des-gaz.apk** sur le téléphone et ouvre-le pour l'installer. Les mises à jour du jeu arrivent ensuite toutes seules."

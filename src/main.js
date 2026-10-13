@@ -7,6 +7,7 @@ import { World } from './world/world.js';
 import { FootMode } from './game/foot.js';
 import { FlightMode, FLIGHT_OFF } from './game/flight.js';
 import { MISSIONS, DIFF, footSablon, flightSablon, duelPlateau } from './game/missions.js';
+import { autoUpdate } from './engine/update.js';
 
 const $ = (id) => document.getElementById(id);
 const touchDevice = matchMedia('(pointer: coarse)').matches;
@@ -274,6 +275,12 @@ function setWorld(theme) {
   ctx.world = world;
 }
 
+let gameVersion = '';
+function toast(text, dur = 5) {
+  const t = $('toast'); t.textContent = text; t.classList.remove('hidden');
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.add('hidden'), dur * 1000);
+}
+
 function title() {
   clearScene();
   state = 'title'; paused = false;
@@ -293,7 +300,7 @@ function title() {
       <div class="tag">Que le Gaz soit avec toi !</div>
       <button class="btn big" id="playBtn">▶ JOUER</button>
     </div>
-    <div class="ver">Version 2 — dessins Gemini, modèle 3D KayKit (CC0)</div>`);
+    <div class="ver">${gameVersion ? 'Version ' + gameVersion + ' — ' : ''}dessins Gemini, modèle 3D KayKit (CC0)</div>`);
   el.id = 'title';
   $('playBtn').onclick = () => { unlock(); sfx.click(); missionsScreen(); };
 }
@@ -509,7 +516,11 @@ requestAnimationFrame(frame);
     document.fonts ? document.fonts.load('40px "Luckiest Guy"') : null,
   ]);
   $('loading').classList.add('hidden');
+  try { gameVersion = (await fetch('version.json', { cache: 'no-store' }).then((r) => r.json())).version; } catch { /* pas de numéro en aperçu */ }
   title();
+  // mises à jour automatiques de l'appli (sur l'écran titre : tout de suite ; en partie : au prochain lancement)
+  autoUpdate((v, now) => toast(now ? `Mise à jour ${v} : le jeu redémarre…` : `Nouvelle version ${v} téléchargée ! Elle sera là au prochain lancement du jeu.`),
+    () => state === 'title' || state === 'menu');
   // ?mission=2 ou ?vol pour tester directement
   const q = new URLSearchParams(location.search);
   if (q.has('mission')) startMission(MISSIONS[Number(q.get('mission')) - 1], { retry: true });

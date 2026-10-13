@@ -237,7 +237,7 @@ Fichiers :
 ## Publication (GitHub, Android)
 
 - Dépôt public : https://github.com/lennoxvdb/guerre-des-gaz (branche `main`).
-- Jeu en ligne (GitHub Pages, servi directement depuis `main`, racine ; `.nojekyll`) :
+- Jeu en ligne (GitHub Pages, publié par `.github/workflows/publier.yml` à chaque envoi : `www/` + `version.json` + `update.zip`) :
   https://lennoxvdb.github.io/guerre-des-gaz/ — chaque envoi sur `main` met le site à jour.
 - Appli : Capacitor 8 (`android/`, appId `com.lennoxvdb.guerredesgaz`, nom « La Guerre des Gaz »),
   plein écran + écran toujours allumé (`MainActivity.java`), icône et écran de démarrage faits par
@@ -249,4 +249,4 @@ Fichiers :
   ne jamais afficher le mot de passe). Garder cette clé : sans elle, impossible de mettre à jour l'appli.
 - Puis : `gh release create v1.0.N publication/guerre-des-gaz.apk --repo lennoxvdb/guerre-des-gaz …`
 - Version 1.0.5 publiée le 2026-10-13 : https://github.com/lennoxvdb/guerre-des-gaz/releases/tag/v1.0.5
-- Pas encore de mises à jour automatiques dans l'appli (Starshiprout en a, avec `@capgo/capacitor-updater`).
+- Mises à jour automatiques : `src/engine/update.js` (`@capgo/capacitor-updater`) compare `version.json` local et celui du site, télécharge `update.zip` ; sur l écran titre il installe tout de suite, sinon au prochain lancement. Depuis la 1.0.8 (la 1.0.5 ne les avait pas).
