@@ -3,10 +3,18 @@
 // si oui, elle la télécharge en silence et l'installe (tout de suite sur l'écran titre, sinon au prochain lancement).
 export const SITE = 'https://lennoxvdb.github.io/guerre-des-gaz/';
 
+// L'outil de mise à jour n'existe dans la page que si on l'« enregistre » avec Capacitor (lib/capacitor.js) :
+// sans ça, Capacitor.Plugins.CapacitorUpdater est vide et rien ne se passe (bug des versions 1.0.8 à 1.0.10).
+let plugin;
+const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const updater = () => {
-  const C = window.Capacitor;
-  if (!C || !C.isNativePlatform || !C.isNativePlatform()) return null;
-  return (C.Plugins && C.Plugins.CapacitorUpdater) || null;
+  if (plugin !== undefined) return plugin;
+  plugin = null;
+  if (!isNative()) return plugin;
+  const X = window.capacitorExports;
+  if (X && X.registerPlugin) plugin = X.registerPlugin('CapacitorUpdater');
+  else if (window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorUpdater) plugin = window.Capacitor.Plugins.CapacitorUpdater;
+  return plugin;
 };
 
 // À appeler TOUT DE SUITE au démarrage : « cette version démarre bien ».
@@ -25,8 +33,9 @@ const newer = (a, b) => {
 
 // say(texte, secondes) : petit message à l'écran ; canApplyNow() : vrai si on peut redémarrer le jeu maintenant
 export async function autoUpdate(say, canApplyNow) {
+  if (!isNative()) return;
   const U = updater();
-  if (!U) return;
+  if (!U) { say('Mise à jour impossible : outil de mise à jour introuvable.', 8); return; }
   let step = 'vérification';
   try {
     const mine = await fetch('version.json', { cache: 'no-store' }).then((r) => r.json());
