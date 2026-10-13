@@ -6,7 +6,8 @@ import { loadKnight, Fighter, SaberTrail } from './entities/fighter.js';
 import { World } from './world/world.js';
 import { FootMode } from './game/foot.js';
 import { FlightMode, FLIGHT_OFF } from './game/flight.js';
-import { MISSIONS, DIFF, footSablon, flightSablon, duelPlateau } from './game/missions.js';
+import { MISSIONS, DIFF } from './game/missions.js';
+import { SpeederMode } from './game/speeder.js';
 import { autoUpdate, appReady } from './engine/update.js';
 
 // tout de suite : dire à l'outil de mise à jour que cette version démarre bien
@@ -117,7 +118,7 @@ gameEl.addEventListener('pointerdown', (e) => {
   unlock();
   if (state !== 'play' || paused || e.target.closest('button')) return;
   const p = local(e);
-  if (modeName === 'flight') { drag = { id: e.pointerId, x: p.x, y: p.y }; $('flightHelp').classList.add('hidden'); return; }
+  if (modeName === 'flight' || modeName === 'speeder') { drag = { id: e.pointerId, x: p.x, y: p.y }; $('flightHelp').classList.add('hidden'); return; }
   if (joy.on || press) return;
   press = { id: e.pointerId, x: p.x, y: p.y, t: performance.now() };
 });
@@ -208,8 +209,8 @@ function readInput() {
 function clearEdges() { input.attack = input.mega = input.action = input.jump = false; input.drag.x = input.drag.y = 0; }
 
 // ---------------- HUD ----------------
-const NAMES = { lucas: 'Lucas', lucas_rire: 'Lucas', roteur: 'Dark Roteur', gazou: 'Maître Gazou', hanpopo: 'Han Popo', pqr: 'P-QR', r2wc: 'R2-WC', soldat: 'Soldat' };
-const portrait = (who) => `assets/portraits/${who === 'lucas_rire' ? 'lucas' : who}.webp`;
+const NAMES = { lucas: 'Lucas', lucas_rire: 'Lucas', roteur: 'Dark Roteur', gazou: 'Maître Gazou', hanpopo: 'Han Popo', pqr: 'P-QR', r2wc: 'R2-WC', soldat: 'Soldat', capitaine: 'Capitaine Burpo' };
+const portrait = (who) => `assets/portraits/${({ lucas_rire: 'lucas', capitaine: 'soldat' })[who] || who}.webp`;
 let radioT = 0, bannerT = 0, pointerTarget = null;
 const TIPS = {
   atk: () => touchDevice ? 'Touche un soldat avec ton doigt (ou ⚔️) : Lucas le frappe au sabre-gaz !' : 'Clique sur un soldat (ou Espace, ou ⚔️) : Lucas le frappe au sabre-gaz !',
@@ -231,7 +232,7 @@ const hud = {
   boss(name, k = 1) {
     if (!name) { $('bossbar').classList.add('hidden'); return; }
     $('bossbar').classList.remove('hidden'); $('bossName').textContent = name; $('bossFill').style.width = Math.round(k * 100) + '%';
-    if (modeName === 'flight' && k >= 1) playMusic('boss');
+    if (modeName !== 'foot' && k >= 1) playMusic('boss');
   },
   banner(text, dur = 2) { const b = $('banner'); b.textContent = text; b.classList.remove('hidden'); bannerT = dur; },
   tip(which) {
@@ -254,6 +255,8 @@ const ctx = {
   scene, camera, puffs, glows, words, hud, input, cam, diff: DIFF, world: null,
   shake(a) { shakeAmt = Math.max(shakeAmt, a); },
   hitstop(t) { stopT = Math.max(stopT, t); },
+  flash(a) { flash(a); },
+  music(name) { playMusic(name); },
   aspect, flightHalf,
   dragScale: () => (camera.right - camera.left) / GW * 1.35,
 };
@@ -312,7 +315,7 @@ function missionsScreen() {
   state = 'menu';
   const cards = MISSIONS.map((m) => {
     const st = save.stars[m.id] || 0;
-    const img = m.icon === 'lucas' ? 'assets/persos/lucas.webp' : m.icon === 'roteur' ? 'assets/persos/roteur.webp' : 'assets/persos/pqr.webp';
+    const img = m.icon;
     return `<button class="card ${m.soon ? 'soon' : ''}" data-id="${m.id}">
       <img src="${img}" alt=""><b>${m.id}. ${m.name}</b><p>${m.desc}</p>
       <div class="stars">${m.soon ? 'Bientôt' : [1, 2, 3].map((i) => (i <= st ? '⭐' : '☆')).join('')}</div></button>`;
@@ -335,7 +338,7 @@ function story(lines, done) {
   const show = () => {
     const L = lines[i];
     const side = L.who && L.who.startsWith('lucas') ? 'left' : 'right';
-    const img = L.who ? `<img class="who ${side}" src="assets/persos/${L.who}.webp" alt="">` : '';
+    const img = L.who ? `<img class="who ${side}" src="assets/persos/${({ capitaine: 'soldat' })[L.who] || L.who}.webp" alt="">` : '';
     el.innerHTML = `${img}<div class="bubble ${L.who ? '' : 'narr'}">${L.who ? `<b style="color:${L.who === 'roteur' ? '#7b3fa0' : '#2f7a2a'}">${NAMES[L.who]}</b>` : ''}<p></p><span class="next">▶</span></div>
       <button class="btn grey skip">Passer ⏩</button>`;
     const p = el.querySelector('p');
@@ -358,43 +361,48 @@ function startMission(m, opts = {}) {
   mission = m;
   setWorld(m.theme);
   cam.zoom = 1; zoomNow = 1; cam.elev = 0;
-  const start = m.id === 1 ? new THREE.Vector3(0, 0, 9) : new THREE.Vector3(0, 0, 7);
+  const part = opts.part || m.parts[0];
+  const start = m.foot ? new THREE.Vector3(...m.foot.start) : new THREE.Vector3();
   cam.target.copy(start).setY(1);
   world.follow(start);
   $('hud').classList.add('hidden');
-  const go = () => { noScreen(); opts.flight ? startFlight({ startPos: world.wcSpot.clone(), hp: DIFF.hp, mega: 0, skipIntro: true }) : startFoot(start); };
+  const go = () => { noScreen(); startPart(part, { retry: !!opts.retry || part !== m.parts[0] }); };
   if (opts.retry) go();
   else { playMusic('menu'); story(m.intro, go); }
 }
 
-function startFoot(start) {
-  resetHud();
-  $('hud').classList.remove('hidden', 'flight');
-  state = 'play'; paused = false;
-  modeName = 'foot';
-  const m = mission;
-  mode = new FootMode(ctx, m.id === 1
-    ? { script: footSablon, heroPos: start, radius: 30 }
-    : { script: duelPlateau, heroPos: start, radius: 18 });
-  playMusic(m.music);
-}
-
-function startFlight(o) {
+// un morceau de mission : à pied, en vol ou en motojet (on garde les cœurs et le gaz d'un morceau à l'autre)
+function startPart(part, carry = {}) {
   if (mode) { mode.dispose(); mode = null; }
-  if (world.wc) world.wc.visible = false;
   resetHud();
-  $('hud').classList.remove('hidden'); $('hud').classList.add('flight');
-  $('flightHelp').classList.toggle('hidden', !touchDevice);
+  const hud = $('hud');
+  hud.classList.remove('hidden', 'flight', 'speeder');
   state = 'play'; paused = false;
-  modeName = 'flight';
-  mode = new FlightMode(ctx, { script: flightSablon, ...o });
-  playMusic('flight');
+  modeName = part;
+  const m = mission;
+  if (part === 'foot') {
+    const F = m.foot;
+    mode = new FootMode(ctx, { script: F.script, heroPos: new THREE.Vector3(...F.start), radius: F.radius, jet: F.jet, indoor: F.indoor });
+    playMusic(F.music || 'foot');
+  } else if (part === 'flight') {
+    if (world.wc) world.wc.visible = false;
+    hud.classList.add('flight');
+    $('flightHelp').classList.toggle('hidden', !touchDevice);
+    const startPos = carry.startPos || (world.wcSpot ? world.wcSpot.clone() : new THREE.Vector3());
+    mode = new FlightMode(ctx, { script: m.flight.script, startPos, hp: carry.hp ?? DIFF.hp, mega: carry.mega ?? 0, skipIntro: carry.retry || !world.wcSpot });
+    playMusic('flight');
+  } else if (part === 'speeder') {
+    hud.classList.add('flight', 'speeder');
+    $('flightHelp').classList.toggle('hidden', !touchDevice);
+    mode = new SpeederMode(ctx, { script: m.speeder.script, hp: carry.hp ?? DIFF.hp });
+    playMusic(m.speeder.music || 'flight');
+  }
 }
 
 function onResult(r) {
   if (r.type === 'board') {
     const hp = mode.hero.hp, mega = mode.hero.mega;
-    startFlight({ startPos: world.wcSpot.clone(), hp, mega });
+    startPart('flight', { startPos: world.wcSpot.clone(), hp, mega });
     return;
   }
   if (r.type === 'dead') return gameOver();
@@ -402,7 +410,7 @@ function onResult(r) {
 }
 
 function win() {
-  const hp = modeName === 'flight' ? mode.ship.hp : mode.hero.hp;
+  const hp = mode.hero ? mode.hero.hp : mode.ship ? mode.ship.hp : mode.player.hp;
   const stars = hp >= DIFF.hp * 0.66 ? 3 : hp >= DIFF.hp * 0.33 ? 2 : 1;
   save.stars[mission.id] = Math.max(save.stars[mission.id] || 0, stars);
   persist();
@@ -416,7 +424,7 @@ function win() {
       <div class="bigstars">${[1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('')}</div>
       <img class="portrait" src="assets/persos/lucas_rire.webp" alt="">
       <div class="row">${next ? '<button class="btn" id="nextBtn">Mission suivante ▶</button>' : ''}<button class="btn alt" id="menuBtn">Missions</button></div>
-      ${next ? '' : '<p class="sub">La suite (l\'attaque de l\'Étoile Puante) arrive bientôt !</p>'}`, 'dim');
+      ${next ? '' : '<p class="sub">Bravo ! Tu as sauvé toute la galaxie. Que le Gaz soit avec toi !</p>'}`, 'dim');
     if (next) $('nextBtn').onclick = () => { sfx.click(); startMission(next); };
     $('menuBtn').onclick = () => { sfx.click(); clearScene(); title(); missionsScreen(); };
   });
@@ -424,14 +432,15 @@ function win() {
 
 function gameOver() {
   state = 'over';
-  const inFlight = modeName === 'flight';
+  const failedPart = modeName;
+  const inFlight = modeName !== 'foot';
   $('hud').classList.add('hidden');
   playMusic(null);
   screen(`<h2>Lucas est K.O. !</h2>
     <img class="portrait" src="assets/persos/roteur.webp" alt="">
     <p class="sub">Dark Roteur rigole… mais le Gaz est encore avec toi !</p>
     <div class="row"><button class="btn" id="retryBtn">${inFlight ? 'Recommencer le vol' : 'Réessayer'}</button><button class="btn grey" id="menuBtn">Missions</button></div>`, 'dim');
-  $('retryBtn').onclick = () => { sfx.click(); startMission(mission, { retry: true, flight: inFlight }); };
+  $('retryBtn').onclick = () => { sfx.click(); startMission(mission, { retry: true, part: failedPart }); };
   $('menuBtn').onclick = () => { sfx.click(); clearScene(); title(); missionsScreen(); };
 }
 
@@ -443,7 +452,7 @@ function pause() {
     <button class="btn alt" id="restartBtn">↻ Recommencer</button>
     <button class="btn grey" id="quitBtn">Missions</button></div>`, 'dim');
   $('resumeBtn').onclick = () => { sfx.click(); paused = false; noScreen(); };
-  $('restartBtn').onclick = () => { sfx.click(); startMission(mission, { retry: true, flight: modeName === 'flight' }); };
+  $('restartBtn').onclick = () => { sfx.click(); startMission(mission, { retry: true, part: modeName }); };
   $('quitBtn').onclick = () => { sfx.click(); clearScene(); title(); missionsScreen(); };
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
@@ -526,8 +535,26 @@ requestAnimationFrame(frame);
   // ?mission=2, ?vol ou ?ventouse pour tester directement
   const q = new URLSearchParams(location.search);
   if (q.has('mission')) startMission(MISSIONS[Number(q.get('mission')) - 1], { retry: true });
-  if (q.has('vol')) { mission = MISSIONS[0]; startMission(mission, { retry: true, flight: true }); }
-  if (q.has('ventouse')) { mission = MISSIONS[0]; startMission(mission, { retry: true, flight: true }); mode.script = null; mode.boss(); }
+  if (q.has('vol')) startMission(MISSIONS[0], { retry: true, part: 'flight' });
+  if (q.has('ventouse')) { startMission(MISSIONS[0], { retry: true, part: 'flight' }); mode.script = null; mode.boss(); }
+  if (q.has('etoile')) { startMission(MISSIONS[4], { retry: true }); mode.script = null; mode.starBoss(); }
+  if (q.has('bolide')) { startMission(MISSIONS[2], { retry: true }); mode.script = null; mode.boss(); }
 })();
 
-window.gdg = { get mode() { return mode; }, get state() { return state; }, input, ctx };
+// pour les tests : faire avancer le jeu de « sec » secondes d'un coup, sans dessiner (avec le robot de tools/bot.js)
+function simulate(sec) {
+  const n = Math.round(sec * 30);
+  for (let i = 0; i < n && state === 'play' && mode && !paused; i++) {
+    const dt = 1 / 30;
+    T += dt;
+    readInput();
+    if (window.gdgBot) window.gdgBot(input, mode, modeName);
+    const r = mode.update(dt);
+    clearEdges();
+    if (world) world.update(dt, T);
+    puffs.update(dt); glows.update(dt); words.update(dt);
+    placeCamera(dt);
+    if (r) onResult(r);
+  }
+}
+window.gdg = { get mode() { return mode; }, get state() { return state; }, input, ctx, simulate };

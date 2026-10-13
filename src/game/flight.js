@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { TEX, flatSprite, shadowBlob, glowSprite, screenYaw, toon, rng } from '../engine/gfx.js';
 import { flightDecor } from '../world/world.js';
 import { makePlunger } from '../entities/plunger.js';
+import { makeStinkStar } from '../entities/etoile.js';
 import { sfx } from '../engine/audio.js';
 import { SR, SU, rand, clamp, pick, Script } from './common.js';
 
@@ -37,6 +38,8 @@ export class FlightMode {
     };
     this.obj = flatSprite(TEX.wc, 2.6);
     this.shadow = shadowBlob(2.4);
+    this.space = !!this.world.space; // dans l'espace : pas de sol, pas d'ombres, des astéroïdes-crottes
+    this.shadow.visible = !this.space;
     this.scene.add(this.obj, this.shadow);
     // décollage : le vaisseau part de là où il était posé
     this.start = opts.startPos.clone();
@@ -80,8 +83,9 @@ export class FlightMode {
 
   // ---------- ennemis ----------
   addFlyer(kind, x, y, move, opts = {}) {
-    const o = kind === 'boss' ? makePlunger() : flatSprite(TEX.rot, 2.2);
+    const o = kind === 'boss' ? makePlunger() : kind === 'star' ? makeStinkStar() : kind === 'rock' ? flatSprite(TEX.crotte, opts.size || 2.6) : flatSprite(TEX.rot, 2.2);
     const sh = shadowBlob(kind === 'boss' ? 7 : 2);
+    sh.visible = !this.space;
     this.scene.add(o, sh);
     const e = { kind, x, y, move, o, sh, t: 0, ph: rand(0, 6), hp: opts.hp ?? this.ctx.diff.rotHp, r: opts.r ?? 1.1, fireT: rand(1.5, 3), dead: false, flash: 0, ...opts };
     this.enemies.push(e);
@@ -105,6 +109,7 @@ export class FlightMode {
   }
   // canons au sol, plus haut que l'écran : ils arrivent avec le décor
   turrets(n = 2) {
+    if (this.space) return this.asteroids(n + 1);
     for (let i = 0; i < n; i++) {
       const G = this.groundAt(rand(-this.Xw + 2, this.Xw - 2), this.Yh + 4 + i * 5);
       const g = new THREE.Group();
@@ -118,6 +123,115 @@ export class FlightMode {
       this.enemies.push({ kind: 'turret', g, G: G.clone(), hp: this.ctx.diff.turretHp, r: 1.3, t: 0, fireT: rand(1, 2.5), dead: false, flash: 0 });
     }
   }
+  // astéroïdes en forme de crotte : ils dérivent vers le bas en tournant, se cassent en deux
+  asteroids(n = 3, size = 2.6, at) {
+    for (let i = 0; i < n; i++) {
+      const big = size > 2;
+      this.addFlyer('rock', at ? at.x + rand(-1, 1) : rand(-this.Xw + 1.5, this.Xw - 1.5), at ? at.y + rand(-1, 1) : this.Yh + 3 + i * 3.2, 'drift',
+        { size, hp: big ? 5 : 1, r: big ? 1.25 : 0.65, spin: rand(-2, 2), vx: rand(-1.2, 1.2), vy: at ? rand(-3, 1) : 0, big });
+    }
+  }
+
+  // l'Étoile Puante (boss de la mission 4)
+  starBoss() {
+    const hp = this.ctx.diff.starHp;
+    const b = this.addFlyer('star', 0, this.Yh + 12, 'star', { hp, maxHp: hp, r: 6, name: 'L\'ÉTOILE PUANTE', phase: 'enter', pt: 0, cyc: 0, fireT: 1.5, spawnT: 9, flushes: 0 });
+    b.o.scale.setScalar(0.82);
+    b.ang = 0;
+    this.bossE = b;
+    this.ctx.hud.boss(b.name, 1);
+    sfx.alarm();
+    return b;
+  }
+  // un tir sur l'Étoile Puante : le trou (s'il est ouvert), une tourelle, ou la coque (ça rebondit)
+  starShot(e, x, y) {
+    const U = e.o.userData;
+    e.o.updateMatrixWorld();
+    const core = this.toPlane(e.o.localToWorld(_a.copy(U.coreLocal)));
+    if (Math.hypot(x - core.x, y - core.y) < 1.9) {
+      if (U.open > 0.6) {
+        e.hp--; e.flash = 0.08;
+        this.ctx.hud.boss(e.name, Math.max(0, e.hp / e.maxHp));
+        if (e.hp <= 0) this.kill(e); else sfx.hit();
+      } else if (Math.random() < 0.25) { this.ctx.words.pop('TOC !', this.wp(x, y).setY(ALT + 1), '#ffffff', 0.9); sfx.clash(); }
+      return true;
+    }
+    for (const tu of U.turrets) {
+      if (!tu.alive) continue;
+      const q = this.toPlane(e.o.localToWorld(_a.copy(tu.local)));
+      if (Math.hypot(x - q.x, y - q.y) < 1.1) {
+        tu.hp--;
+        if (tu.hp <= 0) {
+          tu.alive = false; tu.o.visible = false;
+          const w = this.wp(q.x, q.y);
+          sfx.boom(); this.ctx.words.pop('BAM !', w.clone().setY(ALT + 1.5), '#ffd23f', 1.3);
+          this.ctx.puffs.burst(w.x, ALT, w.z, 0xc38be8, 10, 5, { life: 0.8, s0: 0.8, s1: 2 });
+        }
+        return true;
+      }
+    }
+    return false; // ailleurs, le tir passe au-dessus de la cuvette
+  }
+  updateStar(e, dt) {
+    const p = this.ship, D = this.ctx.diff, U = e.o.userData;
+    const top = this.Yh - 6.5; // la cuvette entière à l écran, le couvercle dépasse en haut
+    e.pt += dt;
+    const half = e.hp < e.maxHp * 0.5;
+    U.anim(this.t, e.phase === 'flush' ? 1 : 0);
+    e.o.updateMatrixWorld();
+    const core = this.toPlane(e.o.localToWorld(_a.copy(U.coreLocal)));
+    const go = (ph) => { e.phase = ph; e.pt = 0; };
+    // les tourelles tirent chacune leur tour
+    const fire = () => {
+      const alive = U.turrets.filter((t) => t.alive);
+      if (!alive.length) return;
+      const tu = pick(alive), q = this.toPlane(e.o.localToWorld(_a.copy(tu.local)));
+      this.eshot(q.x, q.y, Math.atan2(p.y - q.y, p.x - q.x), D.flightBolt);
+    };
+    if (e.phase !== 'enter') {
+      e.fireT -= dt;
+      if (e.fireT <= 0) { e.fireT = (half ? 0.7 : 1.0) / D.flightFire; fire(); }
+      e.spawnT -= dt;
+      if (e.spawnT <= 0) { e.spawnT = 10; this.rotWave(Math.random() < 0.5 ? 'kami' : 'line', 3); }
+      e.x = Math.sin(e.t * 0.25) * 1.5;
+    }
+    switch (e.phase) {
+      case 'enter': if (e.y > top) e.y -= 3 * dt; else go('closed'); break;
+      case 'closed':
+        U.setOpen(0);
+        if (e.pt > (half ? 3.2 : 4.5)) {
+          if (half && e.flushes++ % 2 === 0) { go('flush'); this.say('pqr', 'Elle tire la chasse ! Nous allons être aspirés !', 3); }
+          else { go('opening'); this.ctx.words.pop('LE TROU S\'OUVRE !', this.wp(core.x, core.y + 2).setY(ALT + 2), '#8fff5a', 1.6); }
+        }
+        break;
+      case 'opening': U.setOpen(Math.min(1, e.pt / 0.6)); if (e.pt > 0.6) { go('open'); for (let i = 0; i < 14; i++) this.eshot(core.x, core.y, i / 14 * Math.PI * 2, D.flightBolt * 0.8); } break;
+      case 'open': U.setOpen(1); if (e.pt > 3.2) go('closing'); break;
+      case 'closing': U.setOpen(Math.max(0, 1 - e.pt / 0.5)); if (e.pt > 0.5) go('closed'); break;
+      case 'flush': { // la chasse d'eau : tout est aspiré vers le trou (et le trou est ouvert, à toi de viser !)
+        U.setOpen(1);
+        const dx = core.x - p.x, dy = core.y - p.y, d = Math.hypot(dx, dy) || 1;
+        const pull = 5.5 * Math.min(1, e.pt / 0.6);
+        p.x += dx / d * pull * dt; p.y += dy / d * pull * dt;
+        if (Math.random() < 0.9) {
+          const a = rand(0, Math.PI * 2), r = rand(3, 9), w = this.wp(core.x + Math.cos(a) * r, core.y + Math.sin(a) * r);
+          this.ctx.puffs.emit(w.x, ALT, w.z, 0xc8ff9a, { vx: -Math.sin(a) * 6 - Math.cos(a) * 3, vz: Math.cos(a) * 6 - Math.sin(a) * 3, life: 0.6, s0: 0.6, s1: 0.2, drag: 0 });
+        }
+        if (Math.floor(e.pt * 1.5) !== Math.floor((e.pt - dt) * 1.5)) { this.ctx.words.pop('GLOU GLOU !', this.wp(core.x, core.y).setY(ALT + 2), '#c8ff9a', 1.3); sfx.suck(); }
+        if (e.pt > 3.5) go('closing');
+        break;
+      }
+    }
+  }
+  killStar(e) {
+    e.dying = 3.4; e.dieMax = 3.4; e.spin = 3; e.vx = 0; e.vy = 0;
+    e.o.userData.setOpen(1);
+    this.ctx.hud.boss(null);
+    sfx.mega(); this.ctx.shake(1.4);
+    for (const s of this.eshots) s.life = 0;
+    this.say('lucas_rire', 'Hi hi hi ! Je crois que quelqu\'un a tiré la chasse !', 3.5);
+    this.bossDown = true;
+  }
+
   boss() {
     const b = this.addFlyer('boss', 0, this.Yh + 9, 'boss', { hp: this.ctx.diff.cruiserHp, maxHp: this.ctx.diff.cruiserHp, r: 3, fanT: 2.5, spawnT: 7, spiralT: 0, plungeT: 6, suckT: 9, phase: 'enter', pt: 0 });
     // comme une vraie ventouse posée : cloche penchée vers le sol (et vers Lucas), manche dressé en arrière
@@ -141,6 +255,7 @@ export class FlightMode {
   }
   hitTest(e, x, y, r) {
     if (e.kind === 'boss') return this.bossCircles(e).some(([cx, cy, cr]) => Math.hypot(x - cx, y - cy) < cr + r);
+    if (e.kind === 'star') { const c = this.toPlane(e.o.position); return Math.hypot(x - c.x, y - c.y) < 5.2 + r; }
     const p = e.kind === 'turret' ? this.toPlane(e.G) : e;
     return Math.hypot(x - p.x, y - p.y) < e.r + r;
   }
@@ -165,13 +280,20 @@ export class FlightMode {
     this.ship.mega = Math.min(1, this.ship.mega + 0.06); this.ctx.hud.mega(this.ship.mega);
     if (e.kind === 'turret') { this.scene.remove(e.g); if (Math.random() < 0.3) this.dropPickup(this.toPlane(e.G)); return; }
     if (e.kind === 'boss') return this.killBoss(e);
+    if (e.kind === 'star') return this.killStar(e);
+    if (e.kind === 'rock') { // l'astéroïde-crotte se casse en deux petits
+      this.scene.remove(e.o, e.sh); e.gone = true;
+      if (e.big) this.asteroids(2, 1.3, e);
+      if (Math.random() < 0.15) this.dropPickup(e);
+      return;
+    }
     // le vaisseau se dégonfle en tourbillonnant
     e.dying = 0.7; e.spin = rand(10, 16) * (Math.random() < 0.5 ? -1 : 1);
     const a = rand(0, 6.28); e.vx = Math.cos(a) * 9; e.vy = Math.sin(a) * 9;
     if (Math.random() < 0.09) this.dropPickup(e);
   }
   killBoss(e) {
-    e.dying = 2.4; e.spin = 1.5; e.vx = 0; e.vy = -1;
+    e.dying = 2.4; e.dieMax = 2.4; e.spin = 1.5; e.vx = 0; e.vy = -1;
     if (e.warn) e.warn.material.opacity = 0;
     this.ctx.hud.boss(null);
     sfx.mega(); this.ctx.shake(1.2);
@@ -203,8 +325,8 @@ export class FlightMode {
     for (const s of this.eshots) s.life = 0;
     for (const e of this.enemies) {
       if (e.dead) continue;
-      e.hp -= e.kind === 'boss' ? 8 : 99; e.flash = 1;
-      if (e.kind === 'boss') this.ctx.hud.boss('CROISEUR-VENTOUSE', Math.max(0, e.hp / e.maxHp));
+      e.hp -= e.kind === 'boss' ? 8 : e.kind === 'star' ? (e.o.userData.open > 0.5 ? 10 : 3) : 99; e.flash = 1;
+      if (e.kind === 'boss' || e.kind === 'star') this.ctx.hud.boss(e.kind === 'star' ? e.name : 'CROISEUR-VENTOUSE', Math.max(0, e.hp / e.maxHp));
       if (e.hp <= 0) this.kill(e);
     }
   }
@@ -292,11 +414,13 @@ export class FlightMode {
       this.wp(s.x, s.y, s.o.position);
       let gone = s.y > this.Yh + 2 || Math.abs(s.x) > this.Xw + 2;
       if (!gone) for (const e of this.enemies) {
+        if (e.kind === 'star') { if (!e.dead && e.dying === undefined && this.starShot(e, s.x, s.y)) { gone = true; break; } continue; }
         if (e.dead || e.dying !== undefined || !this.hitTest(e, s.x, s.y, 0.3)) continue;
         e.hp--; e.flash = 0.08; gone = true;
         const hw = this.wp(s.x, s.y);
         this.ctx.glows.burst(hw.x, hw.y, hw.z, 0xeaffc0, 3, 4, { life: 0.2, s0: 0.4, s1: 0.1 });
         if (e.kind === 'boss') this.ctx.hud.boss('CROISEUR-VENTOUSE', Math.max(0, e.hp / e.maxHp));
+        if (e.kind === 'rock' && e.hp > 0) sfx.hit();
         if (e.hp <= 0) this.kill(e); else if (e.kind !== 'rot') sfx.hit();
         break;
       }
@@ -322,12 +446,19 @@ export class FlightMode {
         e.g.scale.setScalar(e.flash > 0 ? 1.15 : 1);
         return true;
       }
+      if (e.gone) return false;
       if (e.dying !== undefined) {
         e.dying -= dt;
+        if (e.kind === 'star') { // la grande chasse d'eau finale : tout tourbillonne et disparaît
+          e.o.userData.anim(this.t, 1);
+          if (Math.random() < 0.9) { const a = rand(0, 6.28), r = rand(1, 7) * e.o.scale.x, w = e.o.position; this.ctx.puffs.emit(w.x + Math.cos(a) * r, ALT, w.z + Math.sin(a) * r, pick([0xc8ff9a, 0x9be36b, 0xffffff]), { vx: -Math.sin(a) * 8, vz: Math.cos(a) * 8, life: 0.8, s0: 1.4, s1: 0.3, drag: 0 }); }
+          if (Math.floor(e.dying * 2) !== Math.floor((e.dying + dt) * 2)) this.ctx.words.pop('GLOU GLOU GLOU !', e.o.position.clone().setY(ALT + 3), '#c8ff9a', 2);
+          if (e.dying < 0.4 && !e.flashed) { e.flashed = true; this.ctx.flash(1); sfx.boom(); }
+        }
         e.x += e.vx * dt; e.y += e.vy * dt;
         e.o.rotation.y += e.spin * dt;
-        const k = Math.max(0.05, e.dying / (e.kind === 'boss' ? 2.4 : 0.7));
-        e.o.scale.setScalar(e.kind === 'boss' ? 0.4 + k * 0.6 : k);
+        const k = Math.max(0.05, e.dying / (e.dieMax || 0.7));
+        e.o.scale.setScalar(e.kind === 'star' ? 0.82 * k : e.kind === 'boss' ? 0.4 + k * 0.6 : k);
         this.wp(e.x, e.y, e.o.position);
         e.sh.position.set(e.o.position.x, 0.04, e.o.position.z);
         if (Math.random() < (e.kind === 'boss' ? 1 : 0.5)) this.ctx.puffs.emit(e.o.position.x + rand(-1, 1), ALT, e.o.position.z + rand(-1, 1), e.kind === 'boss' ? pick([0x9be36b, 0xc38be8, 0xffffff]) : 0xb7e68f, { vy: 1, life: 0.7, s0: e.kind === 'boss' ? 2 : 0.6, s1: e.kind === 'boss' ? 4 : 1.4 });
@@ -335,7 +466,7 @@ export class FlightMode {
         if (e.dying <= 0) {
           this.scene.remove(e.o, e.sh);
           if (e.warn) this.scene.remove(e.warn);
-          if (e.kind === 'boss' && !this.result) { this.result = { type: 'win' }; }
+          if ((e.kind === 'boss' || e.kind === 'star') && !this.result) { this.result = { type: 'win' }; }
           return false;
         }
         return true;
@@ -344,6 +475,8 @@ export class FlightMode {
       else if (e.move === 'swoop') { e.x += e.dir * 7 * dt; e.y = e.y0 - 0.06 * Math.pow(e.t * 7, 2) * 0.5; e.ang = Math.PI - e.dir * 0.7; }
       else if (e.move === 'hover') { if (e.t > 7) e.y -= 7 * dt; else if (e.y > e.ty) e.y -= 6 * dt; e.x += Math.sin(e.t * 1.3 + e.ph) * 2 * dt; e.ang = Math.PI; }
       else if (e.move === 'cross') { e.x += e.dir * 8 * dt; e.ang = Math.PI / 2 * e.dir; }
+      else if (e.move === 'drift') { e.y += (e.vy - 3.5) * dt; e.x += e.vx * dt; e.ang = (e.ang || 0) + e.spin * dt; }
+      else if (e.move === 'star') this.updateStar(e, dt);
       else if (e.move === 'kami') {
         if (!e.dash) {
           e.ang = Math.PI;
@@ -360,9 +493,9 @@ export class FlightMode {
       }
       else if (e.move === 'boss') this.updateBoss(e, dt);
       // tirs
-      if (e.move !== 'boss') {
+      if (e.move !== 'boss' && e.move !== 'star') {
         e.fireT -= dt;
-        if (e.fireT <= 0 && e.move !== 'kami') {
+        if (e.fireT <= 0 && e.move !== 'kami' && e.kind === 'rot') {
           e.fireT = rand(2, 3.4) / D.flightFire * (e.move === 'hover' ? 0.7 : 1);
           const a = Math.atan2(p.y - e.y, p.x - e.x);
           if (e.move === 'hover' && e.y < this.Yh - 1) for (const da of [-0.25, 0, 0.25]) this.eshot(e.x, e.y - 1, a + da, D.flightBolt);
@@ -375,8 +508,9 @@ export class FlightMode {
       else if (e.o.userData.mats) for (const m of e.o.userData.mats) m.emissiveIntensity = e.flash > 0 ? 0.1 : m.userData.base || 0;
       e.sh.position.set(e.o.position.x, 0.04, e.o.position.z);
       // touche Lucas en fonçant dedans
-      if (this.hitTest(e, p.x, p.y, 0.8)) { this.hurt(); if (e.kind !== 'boss') { e.hp = 0; this.kill(e); } }
-      const out = e.move !== 'boss' && (e.y < -this.Yh - 4 || e.y > this.Yh + 14 || e.x < -this.Xw - 12 || e.x > this.Xw + 12);
+      if (this.hitTest(e, p.x, p.y, 0.8)) { this.hurt(); if (e.kind !== 'boss' && e.kind !== 'star') { e.hp = 0; this.kill(e); } }
+      if (e.gone) return false;
+      const out = e.move !== 'boss' && e.move !== 'star' && (e.y < -this.Yh - 4 || e.y > this.Yh + 14 || e.x < -this.Xw - 12 || e.x > this.Xw + 12);
       if (out) { this.scene.remove(e.o, e.sh); return false; }
       return true;
     });
@@ -419,8 +553,9 @@ export class FlightMode {
       this.decorAt += 3;
       if (this.R() < 0.75) {
         const G = this.B.clone().addScaledVector(SU, this.decorAt - travelled + 10).addScaledVector(SR, (this.R() - 0.5) * 50).setY(0);
-        const d = flightDecor(this.world.T, this.R);
+        const d = this.space ? this.spaceDecor() : flightDecor(this.world.T, this.R);
         d.position.copy(G);
+        if (this.space) d.position.y = -6 - this.R() * 14;
         this.scene.add(d);
         this.decor.push(d);
       }
@@ -507,11 +642,20 @@ export class FlightMode {
     }
   }
 
+  // crottes de l'espace qui flottent loin en dessous (décor)
+  spaceDecor() {
+    const o = flatSprite(TEX.crotte, 1.5 + this.R() * 4);
+    o.rotation.y = this.R() * 6.28;
+    o.userData.mat.color.setScalar(0.55 + this.R() * 0.3);
+    return o;
+  }
+
   // le Faucon Pétulant de Han Popo aide au début du vol
   addHan() {
     const o = flatSprite(TEX.faucon, 3.6);
     const sh = shadowBlob(3.4);
     this.scene.add(o, sh);
+    sh.visible = !this.space;
     this.han = { o, sh, x: this.Xw + 6, y: -this.Yh * 0.3, t: 0, fireT: 1, leave: false };
   }
   updateHan(dt) {

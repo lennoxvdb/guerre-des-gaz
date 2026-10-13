@@ -19,6 +19,10 @@ export class FootMode {
     this.enemies = []; this.bolts = []; this.strafes = []; this.pickups = []; this.fx = [];
     this.result = null;
     this.megaName = opts.megaName || 'MÉGA-PROUT';
+    // mission au jetpack : tout le monde vole à cette hauteur, on survole ce qui est bas
+    this.jet = !!opts.jet;
+    this.indoor = !!opts.indoor; // dans la station : pas de vaisseau qui passe au-dessus
+    this.lift = this.jet ? 2.4 : 0;
 
     // Lucas
     const f = new Fighter('lucas', 2.0);
@@ -35,6 +39,10 @@ export class FootMode {
     h.f.yaw = Math.PI * 1.25; // regarde vers le haut de l'écran
     h.f.setSaberOn(0);
     this.saberOn = 0;
+    if (this.jet) {
+      h.f.giveJetpack();
+      h.shadow = shadowBlob(1.4); this.scene.add(h.shadow);
+    }
     this.trail = new SaberTrail(this.scene, 0x8fff5a);
     this.camPos = h.pos.clone();
     // cercle sous l'ennemi qu'on a touché, et petit cercle là où on a touché le sol
@@ -52,7 +60,8 @@ export class FootMode {
 
   // ---------- aides pour les scénarios ----------
   say(who, text, dur) { this.ctx.hud.radio(who, text, dur); }
-  get alive() { return this.enemies.filter((e) => !e.dead).length; }
+  get alive() { return this.enemies.filter((e) => !e.dead && e.kind !== 'gen').length; }
+  get gensLeft() { return this.enemies.filter((e) => !e.dead && e.kind === 'gen').length; }
   clear() { return () => this.alive === 0 && !this.strafes.some((s) => s.drops); }
 
   // un soldat qui tombe du ciel dans une bulle
@@ -79,37 +88,96 @@ export class FootMode {
       this.drop(k, x, z, i * 0.25);
     });
     // un vaisseau-transport passe au-dessus pendant la chute
-    this.flyover(c, false);
+    if (!this.indoor) this.flyover(c, false);
   }
 
   makeSoldier(kind, x, z) {
-    const f = new Fighter('soldat', 2.3);
-    if (kind === 'ventouse') f.givePlunger();
+    const big = kind === 'gros';
+    const f = new Fighter('soldat', big ? 3.1 : 2.3);
+    if (kind === 'ventouse' || big) f.givePlunger();
     f.root.position.set(x, 0, z);
     f.yaw = yawOf(this.hero.pos.x - x, this.hero.pos.z - z);
-    f.setBase('idle');
+    f.setBase(this.jet ? 'fly' : 'idle');
+    if (this.jet) f.giveJetpack();
     this.scene.add(f.root);
     const e = {
-      kind, f, pos: new THREE.Vector3(x, 0, z), knock: V(), y: 0,
-      hp: kind === 'ventouse' ? this.ctx.diff.soldierHp : this.ctx.diff.soldierHp,
-      state: 'idle', t: 0, cool: rand(1.2, 2.4), side: Math.random() < 0.5 ? -1 : 1, dead: false, r: 0.7,
+      kind, f, pos: new THREE.Vector3(x, 0, z), knock: V(), y: 0, ph: rand(0, 6),
+      hp: this.ctx.diff.soldierHp * (big ? 3 : 1), big, reach: big ? 1.35 : 1,
+      state: 'idle', t: 0, cool: rand(1.2, 2.4), side: Math.random() < 0.5 ? -1 : 1, dead: false, r: big ? 1.0 : 0.7,
     };
     this.enemies.push(e);
     return e;
   }
 
-  // Dark Roteur arrive pour le duel
-  spawnRoteur(x, z) {
-    const f = new Fighter('roteur', 3.4);
+  // un générateur à détruire (il garde Han Popo prisonnier dans une bulle)
+  addGenerator(x, z) {
+    const g = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.4, 2.6, 14), new THREE.MeshToonMaterial({ color: 0x6a3a96, emissive: 0xffffff, emissiveIntensity: 0 }));
+    base.position.y = 1.3; base.castShadow = true; g.add(base);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.9, 18, 12), new THREE.MeshBasicMaterial({ color: 0x8fff5a }));
+    ball.position.y = 3.2; g.add(ball);
+    const glow = glowSprite(0x8fff5a, 4, 0.7); glow.position.y = 3.2; g.add(glow);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.1, 6, 30), new THREE.MeshBasicMaterial({ color: 0xd38bff }));
+    ring.position.y = 3.2; g.add(ring);
+    g.position.set(x, 0, z);
+    this.scene.add(g);
+    const e = { kind: 'gen', g, ring, mat: base.material, pos: new THREE.Vector3(x, 0, z), knock: V(), hp: 24, maxHp: 24, r: 1.3, dead: false, state: 'idle', t: 0, flash: 0 };
+    this.world.obstacles.push(e.obst = { x, z, r: 1.3, h: 9 });
+    this.enemies.push(e);
+    return e;
+  }
+  updateGen(e, dt) {
+    e.t += dt;
+    if (e.dead) { e.g.scale.multiplyScalar(Math.max(0, 1 - dt * 4)); if (e.g.scale.x < 0.05) { this.scene.remove(e.g); return false; } return true; }
+    e.ring.rotation.x = e.t * 2; e.ring.rotation.y = e.t * 1.3;
+    e.flash -= dt; e.mat.emissiveIntensity = e.flash > 0 ? 0.6 : 0;
+    // un éclair vers la prison de temps en temps
+    if (this.prison && Math.random() < dt * 3) this.ctx.glows.emit(e.pos.x + (this.prison.x - e.pos.x) * Math.random(), 3.2, e.pos.z + (this.prison.z - e.pos.z) * Math.random(), 0x8fff5a, { life: 0.3, s0: 0.6, s1: 0.1 });
+    return true;
+  }
+  destroyGen(e) {
+    if (e.dead) return;
+    e.dead = true;
+    this.world.obstacles.splice(this.world.obstacles.indexOf(e.obst), 1);
+    sfx.boom(); this.ctx.shake(0.6);
+    this.ctx.words.pop('BOUM !', e.pos.clone().setY(4), '#ffd23f', 1.8);
+    for (let i = 0; i < 20; i++) this.ctx.puffs.emit(e.pos.x, 2, e.pos.z, i % 2 ? 0x9be36b : 0xc38be8, { vx: rand(-5, 5), vy: rand(1, 5), vz: rand(-5, 5), life: 1, s0: 1, s1: 2.5 });
+  }
+  // la prison de Han Popo : une grosse bulle
+  addPrison(x, z) {
+    const han = standee(TEX.hanpopo, 2.4);
+    const bub = new THREE.Mesh(new THREE.SphereGeometry(2, 22, 16), new THREE.MeshBasicMaterial({ color: 0xd38bff, transparent: true, opacity: 0.3, depthWrite: false }));
+    bub.position.y = 1.6;
+    const g = new THREE.Group(); g.add(han, bub); g.position.set(x, 0, z);
+    this.scene.add(g);
+    this.prison = { x, z, g, bub, pos: new THREE.Vector3(x, 0, z) };
+    this.world.obstacles.push(this.prison.obst = { x, z, r: 2, h: 9 });
+    return this.prison;
+  }
+  freePrison() {
+    const P = this.prison;
+    P.g.remove(P.bub);
+    this.world.obstacles.splice(this.world.obstacles.indexOf(P.obst), 1);
+    sfx.pop(); this.ctx.shake(0.4);
+    this.ctx.words.pop('LIBRE !', P.pos.clone().setY(4), '#8fff5a', 2);
+    this.ctx.puffs.burst(P.x, 1.6, P.z, 0xe8d0ff, 20, 5, { life: 0.8, s0: 0.6, s1: 1.6 });
+  }
+
+  // un chevalier au sabre arrive pour le duel : Dark Roteur (à la fin) ou le Capitaine Burpo (mission 2)
+  //   cfg : { who, name, voice, hp, height, saber, throwSaber, summon, rage }
+  spawnRoteur(x, z, cfg = {}) {
+    cfg = { who: 'roteur', name: 'DARK ROTEUR', voice: 'roteur', hp: this.ctx.diff.roteurHp, height: 3.4, saber: 0xb04cff,
+      throwSaber: true, summon: true, rage: false, ...cfg };
+    const f = new Fighter(cfg.who, cfg.height);
     f.root.position.set(x, 0, z);
     f.setBase('guard');
     this.scene.add(f.root);
     const e = {
       kind: 'roteur', f, pos: new THREE.Vector3(x, 0, z), knock: V(), y: 0,
-      hp: this.ctx.diff.roteurHp, maxHp: this.ctx.diff.roteurHp, state: 'stalk', t: 0, cool: 1.5,
+      hp: cfg.hp, maxHp: cfg.hp, state: 'stalk', t: 0, cool: 1.5, cfg, name: cfg.name,
       dead: false, r: 1.1, combo: 0, parried: 0, phase: 1, boss: true, thrown: null,
     };
-    e.trail = new SaberTrail(this.scene, 0xb04cff);
+    e.trail = new SaberTrail(this.scene, cfg.saber);
     e.arc = this.makeArc();
     this.enemies.push(e);
     this.roteur = e;
@@ -157,7 +225,7 @@ export class FootMode {
     const core = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 8), new THREE.MeshBasicMaterial({ color: 0xf3dcff }));
     const glow = glowSprite(0xb04cff, 1.5, 0.95);
     g.add(core, glow);
-    g.position.copy(from); g.position.y = 1.2;
+    g.position.copy(from); g.position.y = this.lift + 1.2;
     this.scene.add(g);
     this.bolts.push({ g, glow, core, vel: dir.clone().multiplyScalar(speed), owner, reflected: false, life: 4 });
     sfx.pew();
@@ -217,7 +285,7 @@ export class FootMode {
   }
   land() {
     const h = this.hero, f = h.f;
-    f.model.rotation.x = 0; f.model.position.set(0, 0, 0); f.root.position.y = 0;
+    f.model.rotation.x = 0; f.model.position.set(0, 0, 0); f.root.position.y = this.lift;
     f.play('jumpLand', 1.4, 0.7);
     sfx.land(); this.ctx.shake(0.35);
     for (let i = 0; i < 24; i++) {
@@ -232,6 +300,12 @@ export class FootMode {
     }
     // si on a bondi sur quelqu'un : grand coup de sabre en arrivant
     if (h.target && !h.target.dead) { h.stage = 2; this.startSwing(); }
+  }
+
+  jetFlame(f, k) {
+    if (!f.jetpack || Math.random() > 0.5 + k * 0.4) return;
+    f.jetpack.getWorldPosition(_c);
+    this.ctx.puffs.emit(_c.x + rand(-0.2, 0.2), _c.y - 0.5, _c.z + rand(-0.2, 0.2), Math.random() < 0.5 ? 0x9be36b : 0xc8f59a, { vy: -4, life: 0.4, s0: 0.35, s1: 0.9, drag: 2 });
   }
 
   // ---------- Lucas ----------
@@ -279,6 +353,15 @@ export class FootMode {
 
   damage(e, n, dir, knock) {
     if (e.dead) return;
+    if (e.kind === 'gen') {
+      e.hp -= n; e.flash = 0.12;
+      this.ctx.words.pop(pick(['BZZT !', 'CRAC !', 'PAF !']), e.pos.clone().setY(4), '#8fff5a', 1.2);
+      this.ctx.glows.burst(e.pos.x, 2.5, e.pos.z, 0xeaffc0, 8, 6, { life: 0.25, s0: 0.3, s1: 0.05 });
+      sfx.hit(); this.ctx.hitstop(0.04);
+      this.hero.mega = Math.min(1, this.hero.mega + 0.04); this.ctx.hud.mega(this.hero.mega);
+      if (e.hp <= 0) this.destroyGen(e);
+      return;
+    }
     // Dark Roteur pare les coups de face quand il est en garde
     if (e.kind === 'roteur' && e.state === 'stalk' && Math.random() < 0.55) {
       this.clash(e.pos.clone().lerp(this.hero.pos, 0.5));
@@ -288,7 +371,7 @@ export class FootMode {
     }
     e.hp -= n;
     e.f.flash = 1;
-    e.knock.addScaledVector(dir, e.kind === 'roteur' ? knock * 0.3 : knock);
+    e.knock.addScaledVector(dir, e.kind === 'roteur' ? knock * 0.3 : e.big ? knock * 0.4 : knock);
     const p = e.pos.clone().setY(2.2);
     this.ctx.words.pop(pick(HIT_WORDS), p, pick(['#ffd23f', '#8fff5a', '#ff8a3d']), 1.3);
     this.ctx.puffs.burst(e.pos.x, 1.2, e.pos.z, 0x9be36b, 6, 3, { life: 0.6, s0: 0.5, s1: 1.4 });
@@ -298,7 +381,7 @@ export class FootMode {
     this.hero.mega = Math.min(1, this.hero.mega + 0.07);
     this.ctx.hud.mega(this.hero.mega);
     if (e.kind === 'roteur') {
-      this.ctx.hud.boss('DARK ROTEUR', Math.max(0, e.hp / e.maxHp));
+      this.ctx.hud.boss(e.name, Math.max(0, e.hp / e.maxHp));
       if (e.hp <= 0) this.defeatRoteur(e);
       else if (e.state !== 'stunned' && e.state !== 'throw') { e.f.play('hit', 1.2); }
       return;
@@ -308,6 +391,7 @@ export class FootMode {
   }
 
   kill(e) {
+    if (e.kind === 'gen') return this.destroyGen(e);
     e.dead = true; e.state = 'dead'; e.t = 0;
     e.f.play('death', 1.3);
     if (Math.random() < 0.5) this.spawnPickup(e.pos, Math.random() < 0.6 ? 'heal' : 'mega');
@@ -349,7 +433,7 @@ export class FootMode {
       if (e.dead || e.state === 'drop') continue;
       const d = dist2(e.pos, h.pos);
       if (d < 7.5) {
-        if (e.kind === 'roteur') { e.state = 'stunned'; e.t = 0; e.hp -= 2; e.f.flash = 1; this.ctx.hud.boss('DARK ROTEUR', Math.max(0, e.hp / e.maxHp)); if (e.hp <= 0) this.defeatRoteur(e); }
+        if (e.kind === 'roteur') { e.state = 'stunned'; e.t = 0; e.hp -= 2; e.f.flash = 1; this.ctx.hud.boss(e.name, Math.max(0, e.hp / e.maxHp)); if (e.hp <= 0) this.defeatRoteur(e); }
         else this.damage(e, 5, _a.copy(e.pos).sub(h.pos).normalize(), 14);
       }
     }
@@ -378,8 +462,9 @@ export class FootMode {
       h.jumpT -= dt;
       const k = Math.min(1, 1 - h.jumpT / h.jumpLen), e = k * (2 - k);
       h.pos.lerpVectors(h.jumpFrom, h.jumpTo, e);
-      const y = Math.sin(Math.PI * k) * 2.6;
+      const y = this.lift + Math.sin(Math.PI * k) * 2.6;
       f.root.position.copy(h.pos); f.root.position.y = y;
+      if (h.shadow) h.shadow.position.set(h.pos.x, 0.05, h.pos.z);
       // pirouette vers l'avant autour de la taille
       const th = Math.min(1, k * 1.15) * Math.PI * 2, c = 1.0;
       f.model.rotation.x = th; f.model.position.set(0, c - c * Math.cos(th), -c * Math.sin(th));
@@ -400,7 +485,7 @@ export class FootMode {
     if (mag > 0.15) { h.target = null; h.moveTo = null; }
     if (h.target && (h.target.dead || h.target.state === 'drop')) h.target = null;
     if (!h.target && !h.moveTo && mag < 0.15 && !inp.block) {
-      for (const e of this.enemies) if (!e.dead && e.kind !== 'roteur' && e.state !== 'drop' && dist2(e.pos, h.pos) < 2.3 + e.r) { h.target = e; break; }
+      for (const e of this.enemies) if (!e.dead && e.kind !== 'roteur' && e.kind !== 'gen' && e.state !== 'drop' && dist2(e.pos, h.pos) < 2.3 + e.r) { h.target = e; break; }
     }
     let autoAtk = false;
     if (h.target) {
@@ -416,7 +501,7 @@ export class FootMode {
     const wantAtk = inp.attack || autoAtk;
     if (inp.jump && h.jumpCool <= 0 && h.special <= 0 && !h.cheer) { this.startJump(mag > 0.15 ? mv : null); return; }
     h.blocking = inp.block && h.atkT <= 0 && h.special <= 0 && !h.cheer;
-    let speed = 6.8;
+    let speed = this.jet ? 8.5 : 6.8;
     if (h.blocking) speed = 2.6;
     if (h.atkT > 0 || h.special > 0) speed = 1.2;
     if (h.cheer) speed = 0;
@@ -445,7 +530,7 @@ export class FootMode {
       const tgt = this.nearestEnemy(12);
       if (tgt && mag < 0.15) f.turnTo(yawOf(tgt.pos.x - h.pos.x, tgt.pos.z - h.pos.z), dt, 10);
     }
-    f.setBase(h.cheer ? 'idle' : h.blocking ? 'block' : mag > 0.15 ? 'run' : 'idle', mag > 0.15 ? 0.6 + mag * 0.6 : 1);
+    f.setBase(h.cheer ? 'idle' : h.blocking ? 'block' : this.jet ? 'fly' : mag > 0.15 ? 'run' : 'idle', mag > 0.15 ? 0.6 + mag * 0.6 : 1);
     if (h.cheer && f.action !== 'cheer') f.play('cheer');
 
     // bouger (avec l'élan des coups) et ne pas traverser le décor
@@ -453,6 +538,11 @@ export class FootMode {
     h.knock.multiplyScalar(Math.exp(-dt * 8));
     this.collide(h.pos, 0.6);
     f.root.position.copy(h.pos);
+    if (this.jet) {
+      f.root.position.y = this.lift + Math.sin(this.t * 3) * 0.2;
+      this.jetFlame(f, mag > 0.15 ? 1 : 0.6);
+      h.shadow.position.set(h.pos.x, 0.05, h.pos.z);
+    }
     // clignote quand il est invincible
     f.root.visible = h.inv <= 0 || Math.floor(this.t * 14) % 2 === 0;
     f.update(dt);
@@ -462,6 +552,7 @@ export class FootMode {
 
   collide(p, r) {
     for (const o of this.world.obstacles) {
+      if (this.jet && o.h < 3) continue;
       const dx = p.x - o.x, dz = p.z - o.z, d = Math.hypot(dx, dz), m = o.r + r;
       if (d < m && d > 0.001) { p.x = o.x + dx / d * m; p.z = o.z + dz / d * m; }
     }
@@ -475,10 +566,10 @@ export class FootMode {
     e.t += dt;
     if (e.state === 'drop') {
       e.y -= dt * 7;
-      f.root.position.set(e.pos.x, Math.max(0, e.y), e.pos.z);
+      f.root.position.set(e.pos.x, Math.max(this.lift, e.y), e.pos.z);
       e.shadow.scale.setScalar(clamp(2.5 - e.y * 0.1, 0.8, 2.5));
       if (e.bubble) e.bubble.rotation.y += dt;
-      if (e.y <= 0) {
+      if (e.y <= this.lift) {
         e.state = 'idle'; e.t = 0;
         f.root.remove(e.bubble); e.bubble = null;
         this.scene.remove(e.shadow);
@@ -494,7 +585,7 @@ export class FootMode {
       if (e.t > 0.6) {
         if (!e.deflating) { e.deflating = true; sfx.deflate(); }
         const k = e.t - 0.6;
-        f.root.position.y = k * k * 6;
+        f.root.position.y = this.lift + k * k * 6;
         f.yaw += dt * 14;
         f.root.scale.setScalar(Math.max(0.01, 1 - k / 0.9));
         if (Math.random() < 0.7) this.ctx.puffs.emit(e.pos.x, f.root.position.y + 0.8, e.pos.z, 0xb7e68f, { vy: -1, life: 0.6, s0: 0.4, s1: 1.1 });
@@ -527,7 +618,7 @@ export class FootMode {
         else if (d < 5) vel.copy(toH).multiplyScalar(-2.6);
         else vel.set(-toH.z * e.side, 0, toH.x * e.side).multiplyScalar(1.6);
         if (Math.random() < dt * 0.3) e.side *= -1;
-        f.setBase(vel.lengthSq() > 0.1 ? 'run' : 'idle', 0.7);
+        f.setBase(this.jet ? 'fly' : vel.lengthSq() > 0.1 ? 'run' : 'idle', 0.7);
         if (e.cool <= 0 && d < 14 && !this.busyShooters()) { e.state = 'aim'; e.t = 0; }
       }
       f.turnTo(yawOf(toH.x, toH.z), dt, 8);
@@ -543,29 +634,30 @@ export class FootMode {
         if (!e.struck && e.t > 0.18) {
           e.struck = true;
           const ang = Math.abs(wrapA(yawOf(toH.x, toH.z) - f.yaw));
-          if (d < 2.6 && ang < 1.3) {
+          if (d < 2.6 * e.reach && ang < 1.3) {
             const facing = this.heroFacing();
             const guard = h.blocking && (facing.x * -toH.x + facing.z * -toH.z) > -0.2;
             if (guard) {
               this.clash(e.pos.clone().lerp(h.pos, 0.5));
               h.f.play('blockHit', 1.4);
               e.state = 'hurt'; e.t = -0.6; f.play('hit2', 1); e.knock.addScaledVector(toH, -6);
-            } else this.hurtHero(1, e.pos);
+            } else this.hurtHero(e.big ? 2 : 1, e.pos);
           }
         }
         if (e.t > 0.6 && e.state === 'strike') { e.state = 'idle'; e.t = 0; e.cool = rand(1, 2); e.struck = false; }
       } else {
         e.cool -= dt;
-        if (d > 1.9) vel.copy(toH).multiplyScalar(D.chaseSpeed);
-        f.setBase(d > 1.9 ? 'run' : 'idle', 0.8);
+        if (d > 1.9 * e.reach) vel.copy(toH).multiplyScalar(D.chaseSpeed * (e.big ? 0.7 : 1));
+        f.setBase(this.jet ? 'fly' : d > 1.9 * e.reach ? 'run' : 'idle', e.big ? 0.6 : 0.8);
         f.turnTo(yawOf(toH.x, toH.z), dt, 8);
-        if (d < 2.4 && e.cool <= 0) { e.state = 'windup'; e.t = 0; f.play('interact', 0.9); e.struck = false; }
+        if (d < 2.4 * e.reach && e.cool <= 0) { e.state = 'windup'; e.t = 0; f.play('interact', 0.9); e.struck = false; }
       }
     }
     e.pos.addScaledVector(vel, dt).addScaledVector(e.knock, dt);
     e.knock.multiplyScalar(Math.exp(-dt * 7));
     this.collide(e.pos, e.r);
     f.root.position.copy(e.pos);
+    if (this.jet) { f.root.position.y = this.lift + Math.sin(this.t * 3 + e.ph) * 0.25; this.jetFlame(f, 0.5); }
     f.update(dt);
     return true;
   }
@@ -587,11 +679,21 @@ export class FootMode {
       e.arc.material.opacity = 0;
       return true;
     }
+    const C = e.cfg;
     if (e.hp < e.maxHp * 0.5 && e.phase === 1) {
       e.phase = 2;
-      this.say('roteur', 'BUUURP ! Soldats, à moi ! Écrasez ce petit rigolo !', 3.5);
-      this.dropGroup(['ventouse', 'tireur'], e.pos, 5);
+      if (C.summon) {
+        this.say(C.voice, C.who === 'roteur' ? 'BUUURP ! Soldats, à moi ! Écrasez ce petit rigolo !' : 'Soldats ! À l\'aide !', 3.5);
+        this.dropGroup(C.rage ? ['gros', 'tireur', 'ventouse'] : ['ventouse', 'tireur'], e.pos, 5);
+      }
     }
+    // la grande colère du duel final : plus rapide, il rote deux fois
+    if (C.rage && e.hp < e.maxHp * 0.25 && e.phase === 2) {
+      e.phase = 3;
+      this.say(C.voice, 'GRRRR… BUUUUUUUURP ! Tu vas voir, petit rigolo !', 3);
+      this.ctx.shake(0.8);
+    }
+    const wind = D.roteurWindup * (e.phase === 3 ? 0.75 : 1);
     switch (e.state) {
       case 'stalk': {
         f.setBase(d > 3.2 ? 'walk' : 'guard', 1);
@@ -600,18 +702,18 @@ export class FootMode {
         e.cool -= dt;
         if (e.cool <= 0) {
           const r = Math.random();
-          if (e.phase === 2 && r < 0.3) { e.state = 'throw'; e.t = 0; f.play('throw', 0.9); }
+          if (C.throwSaber && e.phase >= 2 && r < 0.3) { e.state = 'throw'; e.t = 0; f.play('throw', 0.9); }
           else if (r < 0.62 && d < 6) { e.state = 'windup'; e.t = 0; e.combo = 0; e.parried = 0; }
-          else if (d < 8) { e.state = 'burpUp'; e.t = 0; f.play('spell', 0.7); this.say('roteur', 'BUUUUUURP !', 1.5); }
+          else if (d < 8) { e.state = 'burpUp'; e.t = 0; f.play('spell', 0.7); this.say(C.voice, C.who === 'roteur' ? 'BUUUUUURP !' : 'BRÔÔÔÔT !', 1.5); }
           else e.cool = 0.5;
         }
         break;
       }
       case 'windup': { // il lève son sabre : le sol devient rouge devant lui
         f.turnTo(yawOf(toH.x, toH.z), dt, 5);
-        arcOn = Math.min(1, e.t / D.roteurWindup);
+        arcOn = Math.min(1, e.t / wind);
         if (e.t === dt || e.t < dt * 1.5) f.play(['atk1', 'atk2', 'heavy'][e.combo], 0.35, 0.5);
-        if (e.t > D.roteurWindup) {
+        if (e.t > wind) {
           e.state = 'strike'; e.t = 0;
           f.play(['atk1', 'atk2', 'heavy'][e.combo], 1.6, 0.85);
           sfx.swing(0.6);
@@ -653,6 +755,7 @@ export class FootMode {
           e.state = 'stalk'; e.cool = rand(1.6, 2.4);
           sfx.burp(); this.ctx.shake(0.5);
           this.fx.push({ kind: 'ring', pos: e.pos.clone(), r: 0.5, hit: false, mesh: this.makeRing() });
+          if (e.phase === 3) this.fx.push({ kind: 'ring', pos: e.pos.clone(), r: -2.5, hit: false, mesh: this.makeRing() });
         }
         break;
       }
@@ -687,7 +790,7 @@ export class FootMode {
           if (th.back && dist2(th.s.position, e.pos) < 1.2) {
             this.scene.remove(th.s); e.f.saber.visible = true; e.thrown = null;
             if (th.reflected) {
-              e.hp -= 2; e.f.flash = 1; this.ctx.hud.boss('DARK ROTEUR', Math.max(0, e.hp / e.maxHp));
+              e.hp -= 2; e.f.flash = 1; this.ctx.hud.boss(e.name, Math.max(0, e.hp / e.maxHp));
               this.ctx.words.pop('AÏE !', e.pos.clone().setY(4), '#ff8a3d', 1.6);
               if (e.hp <= 0) { this.defeatRoteur(e); break; }
               e.state = 'stunned'; e.t = 0; f.play('hit2', 0.6);
@@ -735,17 +838,17 @@ export class FootMode {
     const h = this.hero;
     this.script && this.script.update(dt);
     this.updateHero(dt);
-    this.enemies = this.enemies.filter((e) => (e.kind === 'roteur' ? this.updateRoteur(e, dt) : this.updateSoldier(e, dt)));
+    this.enemies = this.enemies.filter((e) => (e.kind === 'roteur' ? this.updateRoteur(e, dt) : e.kind === 'gen' ? this.updateGen(e, dt) : this.updateSoldier(e, dt)));
     // les ennemis se poussent entre eux
     const E = this.enemies;
     for (let i = 0; i < E.length; i++) for (let j = i + 1; j < E.length; j++) {
       const a = E[i], b = E[j];
-      if (a.dead || b.dead || a.state === 'drop' || b.state === 'drop') continue;
+      if (a.dead || b.dead || a.state === 'drop' || b.state === 'drop' || a.kind === 'gen' || b.kind === 'gen') continue;
       const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d = Math.hypot(dx, dz), m = a.r + b.r;
       if (d < m && d > 0.001) { const k = (m - d) / d * 0.5; a.pos.x -= dx * k; a.pos.z -= dz * k; b.pos.x += dx * k; b.pos.z += dz * k; }
     }
     for (const e of E) {
-      if (e.dead || e.state === 'drop') continue;
+      if (e.dead || e.state === 'drop' || e.kind === 'gen') continue;
       const dx = h.pos.x - e.pos.x, dz = h.pos.z - e.pos.z, d = Math.hypot(dx, dz), m = e.r + 0.6;
       if (d < m && d > 0.001) { h.pos.x = e.pos.x + dx / d * m; h.pos.z = e.pos.z + dz / d * m; }
     }
@@ -755,7 +858,7 @@ export class FootMode {
       b.life -= dt;
       b.g.position.addScaledVector(b.vel, dt);
       b.glow.material.rotation += dt * 5;
-      if (Math.random() < 0.5) this.ctx.glows.emit(b.g.position.x, 1.2, b.g.position.z, b.reflected ? 0x8fff5a : 0xb04cff, { life: 0.25, s0: 0.5, s1: 0.1 });
+      if (Math.random() < 0.5) this.ctx.glows.emit(b.g.position.x, b.g.position.y, b.g.position.z, b.reflected ? 0x8fff5a : 0xb04cff, { life: 0.25, s0: 0.5, s1: 0.1 });
       let gone = b.life <= 0;
       if (!gone && !b.reflected && !h.dead && h.jumpT <= 0) {
         const d = dist2(b.g.position, h.pos);
@@ -773,7 +876,7 @@ export class FootMode {
           this.damage(e, 3, _a.copy(b.vel).normalize(), 8); gone = true; break;
         }
       }
-      if (!gone) for (const o of this.world.obstacles) if (Math.hypot(b.g.position.x - o.x, b.g.position.z - o.z) < o.r) { gone = true; break; }
+      if (!gone) for (const o of this.world.obstacles) if ((!this.jet || o.h >= 3) && Math.hypot(b.g.position.x - o.x, b.g.position.z - o.z) < o.r) { gone = true; break; }
       if (gone) { this.scene.remove(b.g); this.ctx.puffs.burst(b.g.position.x, 1.2, b.g.position.z, b.reflected ? 0x9be36b : 0xc38be8, 4, 2, { life: 0.4, s0: 0.3, s1: 0.8 }); }
       return !gone;
     });
@@ -855,12 +958,14 @@ export class FootMode {
   }
 
   dispose() {
-    for (const e of this.enemies) { this.scene.remove(e.f.root); if (e.arc) this.scene.remove(e.arc); if (e.trail) e.trail.dispose(this.scene); if (e.shadow) this.scene.remove(e.shadow); if (e.thrown) this.scene.remove(e.thrown.s); }
+    for (const e of this.enemies) { if (e.g) this.scene.remove(e.g); if (e.f) this.scene.remove(e.f.root); if (e.arc) this.scene.remove(e.arc); if (e.trail) e.trail.dispose(this.scene); if (e.shadow) this.scene.remove(e.shadow); if (e.thrown) this.scene.remove(e.thrown.s); }
     for (const b of this.bolts) this.scene.remove(b.g);
     for (const s of this.strafes) { this.scene.remove(s.ship, s.shadow); for (const im of s.impacts) this.scene.remove(im.w); }
     for (const p of this.pickups) this.scene.remove(p.g);
     for (const x of this.fx) this.scene.remove(x.mesh);
     this.scene.remove(this.hero.f.root, this.marker, this.dot);
+    if (this.hero.shadow) this.scene.remove(this.hero.shadow);
+    if (this.prison) this.scene.remove(this.prison.g);
     this.trail.dispose(this.scene);
   }
 }

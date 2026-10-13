@@ -19,6 +19,7 @@ const PAINT = {
   lucas: { grey: lin(0xf2f4ee), red: lin(0x2f9e35), gold: lin(0x8fdc3c), skin: null },
   soldat: { grey: lin(0x8a7aa3), red: lin(0x4b3466), gold: lin(0xc9b6e6), skin: lin(0x6a5c80) },
   roteur: { grey: lin(0x3a2d4d), red: lin(0x6a2f8f), gold: lin(0x8fdc3c), skin: lin(0x2e2a33) },
+  capitaine: { grey: lin(0x7a2a36), red: lin(0x3a1a2a), gold: lin(0xffd23f), skin: lin(0x5a3040) },
 };
 const RECOLOR = `
 uniform vec3 uGrey; uniform vec3 uRed; uniform vec3 uGold; uniform vec3 uSkin; uniform float uSkinOn; uniform float uFlash;`;
@@ -80,6 +81,15 @@ function soldierHelmet() {
   // masque à gaz : deux gros yeux verts et un filtre
   for (const s of [-1, 1]) g.add(part(new THREE.CylinderGeometry(0.2, 0.2, 0.12, 16), 0x6cff6a, s * 0.27, 0.5, 0.68, { rx: Math.PI / 2, emissive: 0x2a8a20 }));
   g.add(part(new THREE.CylinderGeometry(0.2, 0.24, 0.3, 14), 0x4b4256, 0, 0.12, 0.72, { rx: Math.PI / 2 }));
+  return g;
+}
+// casque du Capitaine Burpo : gros casque rouge, visière noire, crête jaune, yeux rouges
+function capitaineHelmet() {
+  const g = new THREE.Group();
+  g.add(part(new THREE.SphereGeometry(0.8, 22, 16), 0xa83240, 0, 0.42, 0, { outline: 0.04 }));
+  g.add(part(new THREE.SphereGeometry(0.6, 18, 12, -0.9, 1.8, 1.25, 0.8), 0x1d1426, 0, 0.42, 0.24, { outline: 0 }));
+  for (const s of [-1, 1]) g.add(part(new THREE.SphereGeometry(0.1, 10, 8), 0xff4a3a, s * 0.22, 0.5, 0.8, { emissive: 0xaa2010, outline: 0.01 }));
+  g.add(part(new THREE.BoxGeometry(0.16, 0.5, 1.2), 0xffd23f, 0, 1.18, -0.05, { outline: 0.02 }));
   return g;
 }
 function roteurHelmet() {
@@ -177,10 +187,10 @@ const ANIMS = {
   idle: 'Idle', run: 'Running_A', walk: 'Walking_B', guard: '2H_Melee_Idle', block: 'Blocking', blockHit: 'Block_Hit',
   atk1: '1H_Melee_Attack_Slice_Diagonal', atk2: '1H_Melee_Attack_Slice_Horizontal', atk3: '1H_Melee_Attack_Chop',
   stab: '1H_Melee_Attack_Stab', spin: '2H_Melee_Attack_Spin', heavy: '2H_Melee_Attack_Chop',
-  hit: 'Hit_A', hit2: 'Hit_B', death: 'Death_A', cheer: 'Cheer', dodge: 'Dodge_Forward', jump: 'Jump_Full_Short', jumpAir: 'Jump_Idle', jumpLand: 'Jump_Land',
+  hit: 'Hit_A', hit2: 'Hit_B', death: 'Death_A', cheer: 'Cheer', dodge: 'Dodge_Forward', jump: 'Jump_Full_Short', jumpAir: 'Jump_Idle', jumpLand: 'Jump_Land', fly: 'Jump_Idle', sit: 'Sit_Chair_Idle',
   aim: '1H_Ranged_Aiming', shoot: '1H_Ranged_Shoot', spell: 'Spellcast_Shoot', throw: 'Throw', interact: 'Interact',
 };
-const LOOPS = new Set(['idle', 'run', 'walk', 'guard', 'block', 'aim']);
+const LOOPS = new Set(['idle', 'run', 'walk', 'guard', 'block', 'aim', 'fly', 'sit']);
 
 export class Fighter {
   constructor(kind, height) {
@@ -193,7 +203,7 @@ export class Fighter {
     gltf.scene.traverse((o) => { if (o.isMesh && o.material.map) tex = o.material.map; });
     this.mat = paintMaterial(kind, tex);
     model.traverse((o) => {
-      if (HIDE.includes(o.name) && !(kind === 'roteur' && o.name === 'Knight_Cape')) o.visible = false;
+      if (HIDE.includes(o.name) && !((kind === 'roteur' || kind === 'capitaine') && o.name === 'Knight_Cape')) o.visible = false;
       if (o.isSkinnedMesh) { o.material = this.mat; o.castShadow = true; o.frustumCulled = false; }
     });
     const head = model.getObjectByName('head');
@@ -205,6 +215,10 @@ export class Fighter {
     } else if (kind === 'soldat') {
       const h = soldierHelmet(); h.position.set(0, 0.12, 0); h.scale.setScalar(0.86); head.add(h);
       this.gun = bubbleGun(); hand.add(this.gun);
+    } else if (kind === 'capitaine') {
+      const h = capitaineHelmet(); h.position.set(0, 0.1, 0); h.scale.setScalar(0.84); head.add(h);
+      this.saber = makeSaber(0xff6a3a, 0xffe2c8);
+      hand.add(this.saber);
     } else if (kind === 'roteur') {
       const h = roteurHelmet(); h.position.set(0, 0.1, 0); h.scale.setScalar(0.84); head.add(h);
       this.saber = makeSaber(0xb04cff, 0xf3dcff);
@@ -267,6 +281,21 @@ export class Fighter {
     this.saber.userData.tip.getWorldPosition(tip);
   }
   muzzle(out) { return this.gun.userData.muzzle.getWorldPosition(out); }
+  // un jetpack à prout dans le dos (deux réservoirs verts, deux tuyères, des flammes)
+  giveJetpack() {
+    const chest = this.model.getObjectByName('chest') || this.model.getObjectByName('spine');
+    const g = new THREE.Group();
+    for (const sx of [-1, 1]) {
+      g.add(part(new THREE.CapsuleGeometry(0.22, 0.5, 4, 10), 0x4fc23a, sx * 0.27, 0.15, 0, { outline: 0.025 }));
+      g.add(part(new THREE.CylinderGeometry(0.15, 0.2, 0.22, 10), 0x3a3a44, sx * 0.27, -0.32, 0, { outline: 0.02 }));
+    }
+    g.add(part(new THREE.BoxGeometry(0.7, 0.4, 0.18), 0x8d8f99, 0, 0.2, 0.14, { outline: 0.02 }));
+    g.position.set(0, 0.25, -0.45);
+    chest.add(g);
+    this.jetpack = g;
+    return g;
+  }
+
   // le soldat à ventouse : il range son pistolet et sort une ventouse
   givePlunger() {
     this.gun.visible = false;

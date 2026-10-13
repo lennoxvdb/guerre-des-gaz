@@ -69,20 +69,25 @@ combats au sabre-gaz** et **des vaisseaux sur la planète**. Ses choix :
 - Vaisseaux : **les trois** : bataille en vol au-dessus du sol de la planète, vaisseaux qui
   attaquent pendant les combats à pied, et **monter dans son vaisseau** en pleine mission.
 
-Ce qui est fait (version 2) :
-- **Mission 1 « Le désert de Sablon »** : à pied au sabre (soldats à ventouse qui tapent, soldats
-  tireurs dont on **renvoie les bulles** avec 🛡, soldats qui tombent du ciel dans des bulles,
-  Rot-fighters qui bombardent avec des **cercles rouges** au sol), puis on **monte dans le
-  chasseur-WC** posé au nord (bouton MONTER) → décollage → **vol au-dessus du désert** (le Faucon
-  de Han Popo aide au début, canons au sol, bonus TIR+ et ❤) → **Croiseur-Ventouse**.
-- **Mission 2 « Le duel du plateau des Rots »** : duel contre Dark Roteur (zone rouge au sol avant
-  chaque coup ; 2 coups parés sur 3 = il est **SONNÉ** ; anneau de rot à parer ; à mi-vie il lance
-  son sabre en boomerang, à renvoyer avec 🛡, et appelle 2 soldats).
-- Mission 3 « L'Étoile Puante » : carte « Bientôt » (station `assets/vaisseaux/etoile.webp` prête).
-- Histoire en **bandes dessinées** avant/après chaque mission (dessins de la planche 1).
-- Méga-Prout (jauge qui se remplit en frappant), mots « POUF ! CLANG ! PING ! », musiques et sons
-  fabriqués dans le code, 3 étoiles par mission, sauvegarde `gdg_save`.
-- Barre du haut « Navigateur / Téléphone Android / Tourner » comme Starshiprout.
+Campagne (2026-10-13), **6 missions** (le duel contre Dark Roteur seulement à la fin, demande de
+l'utilisateur ; il a aussi demandé une mission au jetpack et une course de motojets) :
+1. **Le désert de Sablon** (`sablon`) : à pied au sabre, puis MONTER dans le chasseur-WC → vol → Croiseur-Ventouse
+   (vaisseau de guerre 3D en forme de ventouse, `src/entities/plunger.js` : plongeon avec bande rouge, aspiration).
+2. **Les marais de Gazouland** (`marais`) : entraînement (saut), gros soldats (`gros`, 3× plus solides, tapent 2 cœurs),
+   duel contre le **Capitaine Burpo** (chevalier rouge, `spawnRoteur(x, z, { who: 'capitaine', … })`).
+3. **La course des motojets** (`marais`, `src/game/speeder.js`) : Lucas assis sur sa moto-prout, arbres à éviter,
+   soldats en motojet (coup de sabre ⚔ = ils partent dans les arbres), boss **Gros Bolide** (mines + éventails).
+4. **La cité des nuages** (`nuages`, `jet: true`) : **jetpack** (tout le monde vole à `lift` 2,4, on survole ce qui
+   est bas `h < 3`), 3 générateurs à casser (`addGenerator`) gardés par des soldats, bulle-prison de Han Popo.
+5. **L'attaque de l'Étoile Puante** (`espace`) : vol dans l'espace, astéroïdes-crottes qui se cassent en deux,
+   boss **Étoile Puante** (`src/entities/etoile.js`, cuvette géante : on ne peut toucher que le trou de la chasse
+   d'eau quand ses volets s'ouvrent, et les tourelles ; à mi-vie elle « tire la chasse » et aspire).
+6. **Le cœur de l'Étoile Puante** (`station`, `indoor`) : vagues de soldats, puis le **duel final** contre Dark
+   Roteur (`rage: true` : grande colère à 25 %, deux anneaux de rot). Fin : Dark Roteur se met à rire.
+Missions = données dans `MISSIONS` (`src/game/missions.js`) : `parts` (`foot`, `flight`, `speeder`), scripts, histoire.
+Pour tester : `?mission=N`, `?vol`, `?ventouse`, `?etoile`, `?bolide`. Robot : charger `tools/bot.js`, puis
+`gdg.simulate(5)` fait avancer le jeu de 5 s d'un coup sans dessiner (utile quand la fenêtre de test est cachée).
+Toucher un soldat = Lucas court le frapper (en plus du bouton ⚔) ; 🌀 SAUT = bond de chevalier avec pirouette.
 
 Commandes : joystick (doigt n'importe où sur la gauche) + boutons ⚔ SABRE, 🛡 PARER (garder
 appuyé), 💨 MÉGA-PROUT, 🚀 MONTER. En vol : glisser le doigt. Clavier : flèches/ZQSD/WASD,

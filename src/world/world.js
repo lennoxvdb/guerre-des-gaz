@@ -1,4 +1,5 @@
-// Les décors en 3D : le désert de Sablon (mission 1, à pied puis en vol) et le plateau des Rots (duel).
+// Les décors en 3D : désert de Sablon, plateau des Rots, marais de Gazouland, cité des nuages,
+// intérieur de l'Étoile Puante, et l'espace (pour le vol).
 import * as THREE from 'three';
 import { canvasTex, rng, toon, toonMat, TEX, flatSprite, standee, shadowBlob, screenYaw, glowSprite } from '../engine/gfx.js';
 
@@ -10,6 +11,22 @@ export const THEMES = {
   plateau: {
     sky: 0x4a2a5a, sand: '#9a7a9e', light: '#c49aa8', dark: '#6a4f78', dot: 'rgba(30,10,40,.3)',
     rock: 0x6e4a7e, rock2: 0x4e3458, dune: 0x8a6a92, hemi: [0xfff0ec, 0x5a3a60, 1.9], sun: [0xffd2b0, 2.3],
+  },
+  marais: {
+    sky: 0x5f7f5a, sand: '#6f8a3e', light: '#93ad55', dark: '#4a6128', dot: 'rgba(20,40,10,.3)',
+    rock: 0x6a7048, rock2: 0x4a5236, dune: 0x55702e, hemi: [0xf0ffe0, 0x3a4a2a, 1.7], sun: [0xfff0c0, 2.0],
+  },
+  nuages: {
+    sky: 0x9fd6ff, sand: '#eef5ff', light: '#ffffff', dark: '#c9dcf2', dot: 'rgba(150,180,220,.22)',
+    rock: 0xf2f2f6, rock2: 0xd88a4a, dune: 0xffffff, hemi: [0xffffff, 0xa8c4e4, 1.8], sun: [0xfff4e0, 2.1],
+  },
+  station: {
+    sky: 0x1a1426, sand: '#56526a', light: '#6e6a84', dark: '#3c384e', dot: 'rgba(0,0,0,.2)',
+    rock: 0x5a5070, rock2: 0x3a3248, dune: 0x4a4458, hemi: [0xe8eaff, 0x2a2238, 1.7], sun: [0xe0d4ff, 2.1],
+  },
+  espace: {
+    sky: 0x0b0820, sand: '#0b0820', light: '#1a1440', dark: '#05040f', dot: 'rgba(255,255,255,.5)',
+    rock: 0x7a5a3a, rock2: 0x5a4030, dune: 0x3a2a50, hemi: [0xe0e0ff, 0x302040, 1.8], sun: [0xffffff, 2.2],
   },
 };
 
@@ -46,6 +63,40 @@ function groundTexture(T, seed) {
       g.fillStyle = R() < 0.6 ? T.dot : 'rgba(255,255,255,.22)';
       g.beginPath(); g.arc(R() * W, R() * W, 0.8 + R() * 2, 0, Math.PI * 2); g.fill();
     }
+  }, true);
+}
+
+// plaques de métal de la station (rivets, bandes jaunes et noires)
+function metalTexture(T) {
+  return canvasTex(512, 512, (g, W) => {
+    g.fillStyle = T.sand; g.fillRect(0, 0, W, W);
+    const n = 4, c = W / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      g.fillStyle = (i + j) % 2 ? T.light : T.sand;
+      g.fillRect(i * c + 3, j * c + 3, c - 6, c - 6);
+      g.fillStyle = 'rgba(0,0,0,.35)';
+      for (const [x, y] of [[10, 10], [c - 10, 10], [10, c - 10], [c - 10, c - 10]]) { g.beginPath(); g.arc(i * c + x, j * c + y, 3.5, 0, 6.3); g.fill(); }
+    }
+    g.strokeStyle = T.dark; g.lineWidth = 6;
+    for (let i = 0; i <= n; i++) { g.beginPath(); g.moveTo(i * c, 0); g.lineTo(i * c, W); g.stroke(); g.beginPath(); g.moveTo(0, i * c); g.lineTo(W, i * c); g.stroke(); }
+    // bande de sécurité
+    for (let x = -W; x < W * 2; x += 40) { g.fillStyle = (x / 40) % 2 ? '#ffd23f' : '#2a2232'; g.beginPath(); g.moveTo(x, W / 2 - 14); g.lineTo(x + 40, W / 2 - 14); g.lineTo(x + 26, W / 2 + 14); g.lineTo(x - 14, W / 2 + 14); g.fill(); }
+  }, true);
+}
+// l'espace : étoiles et nuages de gaz verts et violets (très loin sous le vaisseau)
+function spaceTexture() {
+  const R = rng(5);
+  return canvasTex(1024, 1024, (g, W) => {
+    g.fillStyle = '#0b0820'; g.fillRect(0, 0, W, W);
+    for (let i = 0; i < 26; i++) {
+      const x = R() * W, y = R() * W, r = 80 + R() * 200, col = ['120,255,90', '170,80,255', '90,200,255'][i % 3];
+      for (const dx of [-W, 0, W]) for (const dy of [-W, 0, W]) {
+        const gr = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+        gr.addColorStop(0, `rgba(${col},.22)`); gr.addColorStop(1, `rgba(${col},0)`);
+        g.fillStyle = gr; g.fillRect(0, 0, W, W);
+      }
+    }
+    for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(255,255,255,${0.3 + R() * 0.7})`; const s = R() < 0.92 ? 1.5 : 3; g.fillRect(R() * W, R() * W, s, s); }
   }, true);
 }
 
@@ -101,6 +152,114 @@ function pillar(T, R) {
   return g;
 }
 
+function swampTree(R, s) {
+  const g = new THREE.Group();
+  const trunk = toon(new THREE.CylinderGeometry(0.45, 0.8, 4, 9), 0x5a4030, { outline: 0.06 });
+  trunk.position.y = 2; trunk.rotation.z = (R() - 0.5) * 0.3; g.add(trunk);
+  for (const [x, y, z, r] of [[0, 4.4, 0, 1.8], [1.2, 3.9, 0.4, 1.3], [-1.1, 4.0, -0.3, 1.4], [0.2, 5.2, 0.3, 1.2]]) {
+    const c = toon(new THREE.SphereGeometry(r, 12, 9), R() < 0.5 ? 0x4f8a32 : 0x3f7a2a, { outline: 0.06 });
+    c.position.set(x, y, z); g.add(c);
+  }
+  // racines et lianes
+  for (let i = 0; i < 4; i++) {
+    const a = i / 4 * Math.PI * 2 + R();
+    const r = toon(new THREE.CylinderGeometry(0.12, 0.22, 1.4, 6), 0x5a4030, { outline: 0.03 });
+    r.position.set(Math.cos(a) * 0.8, 0.4, Math.sin(a) * 0.8); r.rotation.set(Math.sin(a) * 0.7, 0, -Math.cos(a) * 0.7); g.add(r);
+  }
+  g.scale.setScalar(s); g.rotation.y = R() * 6;
+  return g;
+}
+function mushroom(R, s) {
+  const g = new THREE.Group();
+  const stem = toon(new THREE.CylinderGeometry(0.35, 0.5, 2, 10), 0xf2e8d0, { outline: 0.05 }); stem.position.y = 1; g.add(stem);
+  const cap = toon(new THREE.SphereGeometry(1.4, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0xd8343a, { outline: 0.06 }); cap.position.y = 1.9; g.add(cap);
+  for (let i = 0; i < 6; i++) {
+    const a = i / 6 * Math.PI * 2 + R();
+    const d = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), toonMat(0xffffff));
+    d.position.set(Math.cos(a) * 0.9, 2.65, Math.sin(a) * 0.9); g.add(d);
+  }
+  g.scale.setScalar(s);
+  return g;
+}
+function reeds(R) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const h = 0.9 + R();
+    const r = toon(new THREE.CylinderGeometry(0.05, 0.07, h, 5), 0x6a8a3a, { outline: 0.02 });
+    r.position.set((R() - 0.5) * 0.8, h / 2, (R() - 0.5) * 0.8); r.rotation.z = (R() - 0.5) * 0.4; g.add(r);
+    const top = toon(new THREE.CapsuleGeometry(0.1, 0.3, 3, 6), 0x7a4a22, { outline: 0.02 }); top.position.set(r.position.x, h, r.position.z); g.add(top);
+  }
+  return g;
+}
+function hut() {
+  const g = new THREE.Group();
+  const d = toon(new THREE.SphereGeometry(2.2, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2), 0x8a6a3a, { outline: 0.07 }); g.add(d);
+  const roof = toon(new THREE.ConeGeometry(1.2, 1.4, 10), 0x5a7a2a, { outline: 0.05 }); roof.position.y = 2.6; g.add(roof);
+  const door = toon(new THREE.CircleGeometry(0.7, 16), 0x3a2414, { outline: 0 }); door.position.set(0, 0.7, 2.18); g.add(door);
+  const win = new THREE.Mesh(new THREE.CircleGeometry(0.3, 12), new THREE.MeshBasicMaterial({ color: 0xffd23f })); win.position.set(1.2, 1.3, 1.75); win.rotation.y = 0.6; g.add(win);
+  return g;
+}
+function cloudTower(h) {
+  const g = new THREE.Group();
+  const t = toon(new THREE.CylinderGeometry(1.1, 1.4, h, 14), 0xf4f0ea, { outline: 0.07 }); t.position.y = h / 2; g.add(t);
+  const top = toon(new THREE.SphereGeometry(1.5, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0xff9a3a, { outline: 0.06 }); top.position.y = h; g.add(top);
+  for (let i = 0; i < 3; i++) {
+    const w = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.1), new THREE.MeshBasicMaterial({ color: 0x5ab0ff }));
+    w.position.set(0, h * (0.35 + i * 0.2), 1.25); g.add(w);
+  }
+  return g;
+}
+function cloudDome(R) {
+  const g = toon(new THREE.SphereGeometry(1.6, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), R() < 0.5 ? 0xffffff : 0xffe8c8, { outline: 0.06 });
+  return g;
+}
+function cloudPuff(R, s) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 9), toonMat(0xffffff));
+    b.position.set((R() - 0.5) * 2.5, (R() - 0.5) * 0.6, (R() - 0.5) * 1.5); b.scale.setScalar(0.7 + R() * 0.6); g.add(b);
+  }
+  g.scale.setScalar(s); g.position.y = -1;
+  return g;
+}
+function gasVat() {
+  const g = new THREE.Group();
+  const c = toon(new THREE.CylinderGeometry(1.2, 1.3, 3, 14), 0x6e6680, { outline: 0.07 }); c.position.y = 1.5; g.add(c);
+  const glass = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 1.2, 14), new THREE.MeshBasicMaterial({ color: 0x8fff5a, transparent: true, opacity: 0.8 }));
+  glass.position.y = 1.7; g.add(glass);
+  const top = toon(new THREE.CylinderGeometry(0.6, 1.25, 0.5, 14), 0x4a4458, { outline: 0.05 }); top.position.y = 3.2; g.add(top);
+  return g;
+}
+function pipeColumn() {
+  const g = new THREE.Group();
+  const p = toon(new THREE.CylinderGeometry(0.8, 0.8, 6, 12), 0x8a7aa8, { outline: 0.07 }); p.position.y = 3; g.add(p);
+  for (const y of [1, 3, 5]) { const r = toon(new THREE.CylinderGeometry(0.95, 0.95, 0.3, 12), 0x5a3a86, { outline: 0.04 }); r.position.y = y; g.add(r); }
+  return g;
+}
+function toilet3d() {
+  const g = new THREE.Group();
+  const bowl = toon(new THREE.CylinderGeometry(1.4, 0.9, 1.4, 18), 0xf4f4f8, { outline: 0.07 }); bowl.position.y = 0.7; g.add(bowl);
+  const seat = toon(new THREE.TorusGeometry(1.25, 0.22, 8, 24).rotateX(Math.PI / 2), 0xe8e4f0, { outline: 0.04 }); seat.position.y = 1.45; g.add(seat);
+  const water = new THREE.Mesh(new THREE.CircleGeometry(1.0, 20).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x8fff5a })); water.position.y = 1.35; g.add(water);
+  const tank = toon(new THREE.BoxGeometry(2.2, 2.2, 0.9), 0xf4f4f8, { outline: 0.07 }); tank.position.set(0, 1.8, -1.4); g.add(tank);
+  const btn = toon(new THREE.CylinderGeometry(0.25, 0.25, 0.15, 12), 0xd8343a, { outline: 0.03 }); btn.position.set(0, 2.95, -1.4); g.add(btn);
+  return g;
+}
+function crate(R) {
+  const g = toon(new THREE.BoxGeometry(1.5, 1.5, 1.5), R() < 0.5 ? 0x8a5ab0 : 0x6e6680, { outline: 0.06 });
+  g.position.y = 0.75; g.rotation.y = R() * 3;
+  const w = new THREE.Group(); w.add(g);
+  return w;
+}
+function throne() {
+  const g = new THREE.Group();
+  const base = toon(new THREE.CylinderGeometry(2.6, 3, 0.8, 20), 0x3a2848, { outline: 0.07 }); base.position.y = 0.4; g.add(base);
+  const seat = toon(new THREE.BoxGeometry(2.2, 1.2, 1.8), 0x5a3a86, { outline: 0.06 }); seat.position.y = 1.4; g.add(seat);
+  const back = toon(new THREE.BoxGeometry(2.4, 3.6, 0.6), 0x5a3a86, { outline: 0.06 }); back.position.set(0, 2.6, -0.9); g.add(back);
+  for (const s of [-1, 1]) { const sp = toon(new THREE.ConeGeometry(0.3, 1, 8), 0xffd23f, { outline: 0.03 }); sp.position.set(s * 1, 4.8, -0.9); g.add(sp); }
+  return g;
+}
+
 export class World {
   constructor(scene, themeName = 'sablon') {
     this.scene = scene;
@@ -121,22 +280,104 @@ export class World {
     this.sun.shadow.bias = -0.0006; this.sun.shadow.normalBias = 0.03;
     this.group.add(this.hemi, this.sun, this.sun.target);
 
-    const tex = groundTexture(T, themeName === 'sablon' ? 3 : 9);
-    tex.repeat.set(16, 16);
-    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(320, 320).rotateX(-Math.PI / 2), new THREE.MeshToonMaterial({ map: tex, gradientMap: null }));
-    this.ground.receiveShadow = true;
+    this.space = themeName === 'espace';
+    const tex = themeName === 'station' ? metalTexture(T) : this.space ? spaceTexture() : groundTexture(T, { sablon: 3, plateau: 9, marais: 13, nuages: 17 }[themeName]);
+    const reps = themeName === 'station' ? 40 : this.space ? 6 : 16;
+    tex.repeat.set(reps, reps);
+    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(320, 320).rotateX(-Math.PI / 2),
+      this.space ? new THREE.MeshBasicMaterial({ map: tex }) : new THREE.MeshToonMaterial({ map: tex, gradientMap: null }));
+    this.ground.receiveShadow = !this.space;
+    if (this.space) this.ground.position.y = -40; // l'espace est loin en dessous
     this.group.add(this.ground);
-    this.tile = 320 / 16;
+    this.tile = 320 / reps;
 
-    if (themeName === 'sablon') this.buildSablon();
-    else this.buildPlateau();
+    ({ sablon: () => this.buildSablon(), plateau: () => this.buildPlateau(), marais: () => this.buildMarais(),
+      nuages: () => this.buildNuages(), station: () => this.buildStation(), espace: () => {} })[themeName]();
   }
 
-  add(obj, x, z, r = 0) {
+  // h : hauteur de l'obstacle (avec le jetpack, Lucas vole au-dessus de ce qui est bas)
+  add(obj, x, z, r = 0, h = 9) {
     obj.position.x = x; obj.position.z = z;
     this.group.add(obj);
-    if (r) this.obstacles.push({ x, z, r });
+    if (r) this.obstacles.push({ x, z, r, h });
     return obj;
+  }
+
+  // ---------- les marais de Gazouland (chez Maître Gazou) ----------
+  buildMarais() {
+    const T = this.T, R = rng(31);
+    // arbres tordus tout autour : la limite du terrain
+    for (let i = 0; i < 30; i++) {
+      const a = i / 30 * Math.PI * 2, d = 27 + R() * 5;
+      this.add(swampTree(R, 1.2 + R() * 0.6), Math.cos(a) * d, Math.sin(a) * d, 1.4);
+    }
+    for (const [x, z, s] of [[-10, -6, 1], [9, -12, 1.1], [14, 6, 0.9], [-15, 9, 1], [4, 15, 0.8], [-4, -17, 1]]) this.add(swampTree(R, s), x, z, 1.1 * s);
+    // mares d'eau verte (on peut marcher autour)
+    for (const [x, z, r] of [[-6, 4, 2.6], [7, -4, 2], [-12, -12, 3], [12, 13, 2.4], [0, -9, 1.8]]) {
+      const m = new THREE.Mesh(new THREE.CircleGeometry(r, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x3f6a4a, transparent: true, opacity: 0.85 }));
+      m.position.set(x, 0.03, z); this.group.add(m);
+      const shine = new THREE.Mesh(new THREE.RingGeometry(r * 0.55, r * 0.62, 28, 1, 0.5, 1.4).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xbfe8c8 }));
+      shine.position.set(x, 0.05, z); this.group.add(shine);
+    }
+    // champignons géants, rochers moussus, roseaux
+    for (const [x, z, s] of [[-17, -2, 1.3], [16, -6, 1], [2, 20, 1.2], [-20, 14, 0.9], [10, 21, 1], [19, 16, 1.1]]) this.add(mushroom(R, s), x, z, 0.9 * s);
+    for (let i = 0; i < 12; i++) {
+      const a = R() * 6.28, d = 8 + R() * 16, x = Math.cos(a) * d, z = Math.sin(a) * d;
+      if (this.obstacles.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + 2)) continue;
+      const k = R() < 0.5;
+      this.add(k ? rock(T, R, 0.8 + R()) : reeds(R), x, z, k ? 0.8 : 0, k ? 1.2 : 0);
+    }
+    // la cabane de Maître Gazou et ses amis
+    this.add(hut(), -3, 13, 2.4);
+    this.friends = { gazou: this.add(standee(TEX.gazou, 1.4), 0.5, 10.5, 0.5), r2: this.add(standee(TEX.r2wc, 1.6), -6, 10, 0.6) };
+    this.add(this.parkedShip('wc', 4.2, 1.0), 9, 9, 1.8);
+  }
+
+  // ---------- la cité des nuages (mission au jetpack) ----------
+  buildNuages() {
+    const T = this.T, R = rng(41);
+    // plateformes de la ville, posées sur les nuages
+    for (const [x, z, r] of [[0, 0, 9], [-16, -10, 6], [15, -12, 6.5], [-14, 14, 6], [16, 13, 5.5], [0, -24, 6], [-26, 2, 5], [26, 0, 5]]) {
+      const pf = toon(new THREE.CylinderGeometry(r, r * 0.8, 1.2, 36), 0xf4f0ea, { outline: 0.08 });
+      pf.position.y = -0.4; this.add(pf, x, z);
+      const trim = new THREE.Mesh(new THREE.TorusGeometry(r, 0.18, 6, 40).rotateX(Math.PI / 2), toonMat(0xff9a3a));
+      trim.position.set(x, 0.2, z); this.group.add(trim);
+    }
+    // tours (hautes : on ne passe pas au-dessus) et petits dômes (on les survole)
+    for (const [x, z, h] of [[-5, -5, 7], [6, 4, 8], [-18, -14, 6], [18, -9, 7], [-11, 18, 6], [19, 16, 5], [3, -26, 7]]) this.add(cloudTower(h), x, z, 1.5, h);
+    for (const [x, z] of [[4, -4], [-6, 5], [-14, -7], [13, -15], [-17, 12], [14, 11], [-3, -22], [-24, 4], [24, -3]]) this.add(cloudDome(R), x, z, 1.6, 1.5);
+    // nuages qui flottent autour (décor)
+    for (let i = 0; i < 18; i++) {
+      const a = i / 18 * Math.PI * 2, d = 34 + R() * 8;
+      this.add(cloudPuff(R, 3 + R() * 3), Math.cos(a) * d, Math.sin(a) * d, 0);
+    }
+    // le Faucon de Han Popo, posé (il a été capturé)
+    this.add(this.parkedShip('faucon', 7, 0.9), 22, 22, 0);
+  }
+
+  // ---------- l'intérieur de l'Étoile Puante ----------
+  buildStation() {
+    const T = this.T, R = rng(51);
+    // grands tuyaux et piliers tout autour : la limite de la salle
+    for (let i = 0; i < 28; i++) {
+      const a = i / 28 * Math.PI * 2, d = 24;
+      this.add(i % 2 ? pipeColumn() : gasVat(), Math.cos(a) * d, Math.sin(a) * d, 1.6);
+    }
+    // cuves de gaz vert, caisses, et des toilettes géantes (c'est l'Étoile Puante !)
+    for (const [x, z] of [[-9, -8], [9, -9], [-10, 8], [10, 9]]) this.add(gasVat(), x, z, 1.4);
+    for (const [x, z, ry] of [[-15, 0, 1.5], [15, 1, -1.5], [0, 15, 3.1]]) { const t = toilet3d(); t.rotation.y = ry; this.add(t, x, z, 1.8); }
+    for (let i = 0; i < 8; i++) {
+      const a = R() * 6.28, d = 12 + R() * 8, x = Math.cos(a) * d, z = Math.sin(a) * d;
+      if (this.obstacles.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + 2)) continue;
+      this.add(crate(R), x, z, 0.9);
+    }
+    // le trône de Dark Roteur, au nord
+    this.add(throne(), 0, -19, 2.2);
+    // lumières de la salle
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * Math.PI * 2;
+      const l = glowSprite(i % 2 ? 0x8fff5a : 0xb04cff, 5, 0.35); l.position.set(Math.cos(a) * 21, 0.2, Math.sin(a) * 21); this.group.add(l);
+    }
   }
 
   // Le village de Lucas, le camp de la Rébellion, le chasseur-WC posé

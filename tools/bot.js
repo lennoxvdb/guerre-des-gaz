@@ -8,17 +8,30 @@ window.gdgBot = (input, mode, name) => {
     let tgt = null, best = 1e9;
     for (const e of mode.enemies) if (!e.dead && e.state !== 'drop') { const d = Math.hypot(e.pos.x - h.pos.x, e.pos.z - h.pos.z); if (d < best) { best = d; tgt = e; } }
     if (!tgt && mode.world.beaconOn) tgt = { pos: mode.world.wcSpot };
+    if (!tgt && mode.prison && mode.gensLeft === 0) tgt = { pos: mode.prison.pos };
+    if (mode.t < 3) input.jump = true;
     const danger = mode.bolts.some((b) => !b.reflected && Math.hypot(b.g.position.x - h.pos.x, b.g.position.z - h.pos.z) < 3.5)
       || (mode.roteur && !mode.roteur.dead && ['windup', 'strike', 'burpUp', 'throw'].includes(mode.roteur.state));
     input.block = danger;
     if (tgt) {
       const dx = tgt.pos.x - h.pos.x, dz = tgt.pos.z - h.pos.z;
-      const far = Math.hypot(dx, dz) > (tgt.f ? 2.2 : 1);
+      const foe = !!tgt.kind;
+      const far = Math.hypot(dx, dz) > (foe ? 2.2 + (tgt.r || 0) : 1);
       if (far && !danger) { input.move.x = dx * SRx + dz * SRz; input.move.y = dx * SUx + dz * SUz; const l = Math.hypot(input.move.x, input.move.y) || 1; input.move.x /= l; input.move.y /= l; }
-      if (!far && tgt.f && !danger) input.attack = Math.random() < 0.5;
+      if (!far && foe && !danger) input.attack = Math.random() < 0.5;
     }
     if (h.mega >= 1) input.mega = true;
     input.action = true;
+  } else if (name === 'speeder') {
+    const p = mode.player;
+    let mx = -p.x * 0.15, my = (-mode.Yh * 0.45 - p.y) * 0.3;
+    for (const t of mode.trees) { const q = mode.rel(t.G); const dy = q.y - p.y; if (dy > -1 && dy < 7 && Math.abs(q.x - p.x) < 2.4) mx += (p.x >= q.x ? 1 : -1) * 2.5; }
+    for (const s of mode.eshots) { if (Math.hypot(s.x - p.x, s.y - p.y) < 3) mx += (p.x >= s.x ? 1 : -1) * 1.5; }
+    for (const m of mode.mines) { const q = mode.rel(m.G); if (Math.abs(q.y - p.y) < 5 && Math.abs(q.x - p.x) < 2.5) mx += (p.x >= q.x ? 1 : -1) * 2.5; }
+    const near = mode.enemies.some((e) => !e.dead && Math.abs(e.x - p.x) < 3.4 && Math.abs(e.y - p.y) < 2.6);
+    if (near) input.attack = true;
+    if (p.mega >= 1 && mode.bossE) input.mega = true;
+    const l = Math.hypot(mx, my); input.move.x = l > 1 ? mx / l : mx; input.move.y = l > 1 ? my / l : my;
   } else if (name === 'flight') {
     // il se place sous l'ennemi le plus proche et s'écarte des tirs, des kamikazes et de la ventouse
     const p = mode.ship;

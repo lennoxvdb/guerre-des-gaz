@@ -155,8 +155,8 @@ body.phone #tip { bottom: 74px; }
 /* ---------- écrans ---------- */
 #screens { position: absolute; inset: 0; z-index: 20; pointer-events: none; }
 .screen {
-  position: absolute; inset: 0; pointer-events: auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 14px; padding: 20px; text-align: center; animation: fade .3s ease-out;
+  position: absolute; inset: 0; pointer-events: auto; display: flex; flex-direction: column; align-items: center; justify-content: safe center;
+  gap: 14px; padding: 20px; text-align: center; animation: fade .3s ease-out; overflow-y: auto;
 }
 body.phone .screen { padding-top: 40px; }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
@@ -239,3 +239,7 @@ body.phone #game.narrow #radio:not(.hidden) ~ #bossbar { top: 214px; }
   background: var(--yellow); color: var(--ink); border: 3px solid var(--ink); border-radius: 14px;
   padding: 8px 14px; font-size: 15px; text-align: center; box-shadow: 0 4px 0 var(--ink); animation: pop .3s ease-out;
 }
+
+/* en motojet : on garde le sabre (et le Méga-Prout) */
+#hud.speeder #btnAtk { display: flex !important; }
+#hud.speeder #btnMega { right: 8px; bottom: 118px; width: 80px; height: 80px; }
