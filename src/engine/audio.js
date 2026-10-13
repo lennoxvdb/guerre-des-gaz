@@ -146,6 +146,11 @@ export const sfx = {
     noise(t, 0.7, 500, 0.8, 0.4, 'lowpass', sfxBus, 80);
     tone(t, 0.6, 120, 35, 0.35, 'sine');
   },
+  suck() { // la ventouse aspire
+    if (!ok('suck', 0.2)) return;
+    const t = now();
+    noise(t, 0.3, 2400, 2, 0.12, 'bandpass', sfxBus, 400);
+  },
   jump() { // propulsé par un prout
     if (!ok('jump', 0.2)) return;
     const t = now();

@@ -5,7 +5,7 @@ import { dist2 } from './common.js';
 export const DIFF = {
   hp: 6, soldierHp: 3, roteurHp: 34, aimTime: 0.85, boltSpeed: 6.5, shootCool: 2.6, windup: 0.75, chaseSpeed: 3.6,
   maxAimers: 2, blockAnyDir: true, roteurWindup: 0.8, stunTime: 3,
-  rotHp: 2, turretHp: 4, cruiserHp: 340, flightFire: 0.8, flightBolt: 6, flightSpeed: 1,
+  rotHp: 3, turretHp: 5, cruiserHp: 300, flightFire: 1.15, flightBolt: 7, flightSpeed: 1,
 };
 
 const N = (text) => ({ who: null, text });
@@ -114,25 +114,27 @@ export function* flightSablon(f) {
   f.turrets(2); yield 3;
   f.rotWave('v', 7); yield 2; yield f.clear();
   if (f.han) f.han.leave = true;
-  f.say('hanpopo', 'Mon Faucon a besoin d\'une réparation. Bonne chance, gamin !', 3);
-  f.rotWave('left', 5); yield 2.5; f.rotWave('right', 5); yield 3;
+  f.say('hanpopo', 'Mon Faucon a besoin d\'une réparation. Attention aux kamikazes qui clignotent : bouge !', 4);
+  f.rotWave('kami', 3); yield 3.5;
+  f.rotWave('left', 5); yield 2.5; f.rotWave('right', 5); yield 2;
+  f.rotWave('lowLeft', 4); yield 3;
   f.turrets(3); yield 2;
   f.rotWave('hover', 3); yield 2; yield f.clear();
-  f.say('r2wc', 'Bip bip ! Bip bouuu ! (traduction : des canons au sol, attention !)', 3.5);
+  f.say('r2wc', 'Bip bip ! Bip bouuu ! (traduction : ils arrivent par en bas, attention !)', 3.5);
+  f.rotWave('lowRight', 5); yield 2; f.rotWave('kami', 4); yield 3;
   f.rotWave('line', 6); f.turrets(2); yield 4;
-  f.rotWave('v', 7); yield 2; yield f.clear();
+  f.rotWave('v', 7); yield 2; f.rotWave('lowLeft', 4); yield 2; yield f.clear();
   f.say('gazou', 'Les canons au sol, vise ! Ils lâchent souvent des bonus.', 3.5);
-  f.turrets(3); yield 2.5; f.rotWave('left', 4); yield 2; f.rotWave('right', 4); yield 3;
+  f.turrets(3); yield 2.5; f.rotWave('left', 4); yield 2; f.rotWave('right', 4); yield 2; f.rotWave('kami', 4); yield 3;
   f.rotWave('hover', 4); yield 2; yield f.clear();
-  f.rotWave('line', 7); yield 2.5; f.turrets(2); f.rotWave('v', 5); yield 2; yield f.clear();
-  f.rotWave('left', 6); f.rotWave('right', 6); yield 3; f.turrets(3); yield 2; yield f.clear();
-  if (f.ship.mega >= 1) f.say('gazou', 'Pleine, ta jauge est. Le Méga-Prout 💨, garde-le pour le croiseur !', 4);
+  f.rotWave('lowRight', 5); f.rotWave('lowLeft', 5); yield 3; f.turrets(2); f.rotWave('kami', 5); yield 2; yield f.clear();
+  if (f.ship.mega >= 1) f.say('gazou', 'Pleine, ta jauge est. Le Méga-Prout 💨, garde-le pour la ventouse !', 4);
   yield 2;
-  f.say('pqr', 'Un croiseur ! Un ÉNORME croiseur ! Nous sommes perdus !', 3.5);
+  f.say('pqr', 'Une ventouse ! Une ÉNORME ventouse ! Elle va nous déboucher !', 3.5);
   hud.banner('ATTENTION : CROISEUR-VENTOUSE !', 2.5);
   yield 1;
   f.boss();
-  hud.objective('Dégonfle le Croiseur-Ventouse !');
+  hud.objective('Dégonfle le Croiseur-Ventouse ! Bouge quand la bande rouge clignote !');
 }
 
 // ---------- mission 2, le duel ----------

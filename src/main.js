@@ -523,10 +523,11 @@ requestAnimationFrame(frame);
   title();
   // mises à jour automatiques de l'appli (sur l'écran titre : tout de suite ; en partie : au prochain lancement)
   autoUpdate(toast, () => state === 'title' || state === 'menu');
-  // ?mission=2 ou ?vol pour tester directement
+  // ?mission=2, ?vol ou ?ventouse pour tester directement
   const q = new URLSearchParams(location.search);
   if (q.has('mission')) startMission(MISSIONS[Number(q.get('mission')) - 1], { retry: true });
   if (q.has('vol')) { mission = MISSIONS[0]; startMission(mission, { retry: true, flight: true }); }
+  if (q.has('ventouse')) { mission = MISSIONS[0]; startMission(mission, { retry: true, flight: true }); mode.script = null; mode.boss(); }
 })();
 
 window.gdg = { get mode() { return mode; }, get state() { return state; }, input, ctx };

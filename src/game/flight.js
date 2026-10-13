@@ -2,7 +2,7 @@
 // Les vaisseaux volent sur un « plafond » à hauteur ALT ; les canons sont au sol.
 // Toutes les collisions se font comme on les voit sur l'écran.
 import * as THREE from 'three';
-import { TEX, flatSprite, shadowBlob, glowSprite, screenYaw, toon, rng } from '../engine/gfx.js';
+import { TEX, flatSprite, shadowBlob, glowSprite, screenYaw, toon, rng, outlineGeo, outlineMat } from '../engine/gfx.js';
 import { flightDecor } from '../world/world.js';
 import { sfx } from '../engine/audio.js';
 import { SR, SU, rand, clamp, pick, Script } from './common.js';
@@ -21,6 +21,55 @@ export const FLIGHT_OFF = new THREE.Vector3(8, 20, 8);
 const VIEW = FLIGHT_OFF.clone().normalize().negate(); // la direction du regard de la caméra
 const V = () => new THREE.Vector3();
 const _a = V();
+
+// Le Croiseur-Ventouse en 3D : une vraie ventouse de toilettes (cloche en caoutchouc rouge tournée vers
+// Lucas, long manche en bois) avec des réacteurs violets et des canons. Couchée sur le « plafond » du vol.
+function makePlunger() {
+  const g = new THREE.Group();
+  const mats = [];
+  const M = (color) => { const m = new THREE.MeshToonMaterial({ color, emissive: 0xffffff, emissiveIntensity: 0 }); mats.push(m); return m; };
+  // une pièce et son contour foncé, ensemble (pour qu'ils bougent ensemble)
+  const add = (geo, mat, outline = 0.08) => {
+    const part = new THREE.Group();
+    const m = new THREE.Mesh(geo, mat); m.castShadow = true; part.add(m);
+    if (outline) part.add(new THREE.Mesh(outlineGeo(geo, outline), outlineMat));
+    g.add(part);
+    return part;
+  };
+  // la cloche : profil tourné autour de l'axe, ouverture vers +z (vers le bas de l'écran, vers Lucas)
+  const prof = [[0.55, -0.2], [0.9, 0.1], [1.7, 0.6], [2.5, 1.4], [3.0, 2.3], [3.2, 2.9], [3.35, 3.2]].map(([r, y]) => new THREE.Vector2(r, y));
+  add(new THREE.LatheGeometry(prof, 40).rotateX(Math.PI / 2), M(0xd8343a), 0.1);
+  g.add(new THREE.Mesh(new THREE.LatheGeometry(prof.map((v) => new THREE.Vector2(v.x * 0.95, v.y)), 40).rotateX(Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x4a0f18, side: THREE.BackSide })));
+  const rim = add(new THREE.TorusGeometry(3.3, 0.28, 10, 44), M(0xa8222a), 0.05);
+  rim.position.z = 3.2;
+  // reflet du caoutchouc
+  const shine = new THREE.Mesh(new THREE.TorusGeometry(2.3, 0.12, 6, 30, 1.6), new THREE.MeshBasicMaterial({ color: 0xff9a9a }));
+  shine.position.set(0, 0, 1.4); shine.rotation.z = 2.2; g.add(shine);
+  // le manche en bois, avec des bagues
+  const handle = add(new THREE.CylinderGeometry(0.5, 0.5, 8.4, 16).rotateX(Math.PI / 2), M(0xc8894a));
+  handle.position.z = -4.4;
+  for (const z of [-1.6, -4.4, -7.2]) {
+    const ring = add(new THREE.CylinderGeometry(0.58, 0.58, 0.35, 16).rotateX(Math.PI / 2), M(0x5a3a66), 0.04);
+    ring.position.z = z;
+  }
+  const knob = add(new THREE.SphereGeometry(0.8, 16, 12), M(0x5a3a66));
+  knob.position.z = -8.8;
+  // réacteurs violets au bout du manche, petites ailes, canons sur le bord de la cloche
+  for (const sx of [-1, 1]) {
+    const pod = add(new THREE.CapsuleGeometry(0.42, 1.4, 4, 10).rotateX(Math.PI / 2), M(0x6e6e80), 0.05);
+    pod.position.set(sx * 1.35, 0, -7.6);
+    const wing = add(new THREE.BoxGeometry(1.0, 0.18, 1.6), M(0x8a5ab0), 0.04);
+    wing.position.set(sx * 0.85, 0, -7.4);
+    const fire = glowSprite(0xb04cff, 2.2, 0.9); fire.position.set(sx * 1.35, 0, -8.9); g.add(fire);
+    const gun = add(new THREE.CylinderGeometry(0.22, 0.3, 1.2, 10).rotateX(Math.PI / 2), M(0x3a2848), 0.04);
+    gun.position.set(sx * 2.4, 1.6, 2.6);
+  }
+  g.userData.mats = mats;
+  return g;
+}
+
+const BOSS_PTS = [[1.8, 3.0], [-2.5, 0.8], [-5.5, 0.8], [-8.8, 1.0]];
 
 export class FlightMode {
   constructor(ctx, opts) {
@@ -77,8 +126,8 @@ export class FlightMode {
 
   // ---------- ennemis ----------
   addFlyer(kind, x, y, move, opts = {}) {
-    const o = flatSprite(TEX[kind === 'boss' ? 'ventouse' : 'rot'], kind === 'boss' ? 5 : 2.2);
-    const sh = shadowBlob(kind === 'boss' ? 6 : 2);
+    const o = kind === 'boss' ? makePlunger() : flatSprite(TEX.rot, 2.2);
+    const sh = shadowBlob(kind === 'boss' ? 7 : 2);
     this.scene.add(o, sh);
     const e = { kind, x, y, move, o, sh, t: 0, ph: rand(0, 6), hp: opts.hp ?? this.ctx.diff.rotHp, r: opts.r ?? 1.1, fireT: rand(1.5, 3), dead: false, flash: 0, ...opts };
     this.enemies.push(e);
@@ -93,6 +142,11 @@ export class FlightMode {
       if (pattern === 'left') this.addFlyer('rot', -X - 3 - i * 2.2, this.Yh * 0.6, 'swoop', { dir: 1, y0: this.Yh * 0.6 });
       if (pattern === 'right') this.addFlyer('rot', X + 3 + i * 2.2, this.Yh * 0.4, 'swoop', { dir: -1, y0: this.Yh * 0.4 });
       if (pattern === 'hover') this.addFlyer('rot', -X + 2 * X * k, top + i, 'hover', { ty: this.Yh * (0.35 + 0.25 * (i % 2)), hp: this.ctx.diff.rotHp + 2 });
+      // kamikazes : ils s'arrêtent, clignotent… puis foncent là où est Lucas
+      if (pattern === 'kami') this.addFlyer('rot', -X + 2 * X * k, top + i * 1.5, 'kami', { ty: this.Yh * (0.45 + 0.2 * Math.random()), hp: 2 });
+      // escadrilles qui traversent l'écran tout en bas, à la hauteur de Lucas
+      if (pattern === 'lowLeft') this.addFlyer('rot', -X - 3 - i * 2.4, -this.Yh * 0.5 + (i % 2) * 1.6, 'cross', { dir: 1 });
+      if (pattern === 'lowRight') this.addFlyer('rot', X + 3 + i * 2.4, -this.Yh * 0.35 - (i % 2) * 1.6, 'cross', { dir: -1 });
     }
   }
   // canons au sol, plus haut que l'écran : ils arrivent avec le décor
@@ -111,17 +165,25 @@ export class FlightMode {
     }
   }
   boss() {
-    const b = this.addFlyer('boss', 0, this.Yh + 7, 'boss', { hp: this.ctx.diff.cruiserHp, maxHp: this.ctx.diff.cruiserHp, r: 2.4, fanT: 2.5, spawnT: 6, spiralT: 0 });
-    b.o.rotation.y = screenYaw(Math.PI);
+    const b = this.addFlyer('boss', 0, this.Yh + 9, 'boss', { hp: this.ctx.diff.cruiserHp, maxHp: this.ctx.diff.cruiserHp, r: 3, fanT: 2.5, spawnT: 7, spiralT: 0, plungeT: 6, suckT: 9, phase: 'enter', pt: 0 });
+    // comme une vraie ventouse posée : cloche penchée vers le sol (et vers Lucas), manche dressé en arrière
+    b.o.rotation.order = 'YXZ';
+    b.o.rotation.set(0.95, screenYaw(0), 0);
+    // bande rouge : « attention, elle va plonger ici »
+    b.warn = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0, depthWrite: false }));
+    b.warn.rotation.y = screenYaw(0); b.warn.renderOrder = 4;
+    this.scene.add(b.warn);
     this.bossE = b;
     this.ctx.hud.boss('CROISEUR-VENTOUSE', 1);
     sfx.alarm();
     return b;
   }
   // les zones touchables du croiseur (en forme de ventouse)
+  // zones touchables : des points du vrai modèle 3D, vus comme sur l'écran (la cloche d'abord, puis le manche)
   bossCircles(e) {
-    const L = 10.7;
-    return [[e.x, e.y - L * 0.3, 2.4], [e.x, e.y, 0.8], [e.x, e.y + L * 0.22, 0.8]];
+    e.o.updateMatrixWorld();
+    return BOSS_PTS.map(([z, r]) => { const q = this.toPlane(e.o.localToWorld(_a.set(0, 0, z))); return [q.x, q.y, r]; });
   }
   hitTest(e, x, y, r) {
     if (e.kind === 'boss') return this.bossCircles(e).some(([cx, cy, cr]) => Math.hypot(x - cx, y - cy) < cr + r);
@@ -156,6 +218,7 @@ export class FlightMode {
   }
   killBoss(e) {
     e.dying = 2.4; e.spin = 1.5; e.vx = 0; e.vy = -1;
+    if (e.warn) e.warn.material.opacity = 0;
     this.ctx.hud.boss(null);
     sfx.mega(); this.ctx.shake(1.2);
     this.ctx.words.pop('CROISEUR DÉGONFLÉ !', this.wp(e.x, e.y).setY(ALT + 2), '#8fff5a', 2.2);
@@ -165,7 +228,7 @@ export class FlightMode {
   }
 
   dropPickup(at) {
-    const kind = this.ship.power < 4 && Math.random() < 0.5 ? 'power' : 'heal';
+    const kind = this.ship.power < 3 && Math.random() < 0.5 ? 'power' : 'heal';
     const o = flatSprite(TEX.bonus, 1.1);
     const glow = glowSprite(kind === 'power' ? 0x8fff5a : 0xff6a8a, 2.6, 0.7);
     const g = new THREE.Group(); g.add(glow, o);
@@ -243,7 +306,7 @@ export class FlightMode {
       // tir automatique
       p.fireT -= dt;
       if (p.fireT <= 0) {
-        p.fireT = 0.14;
+        p.fireT = 0.16;
         const add = (dx, ang) => {
           const o = beam();
           o.rotation.y = screenYaw(ang) + Math.PI;
@@ -252,7 +315,7 @@ export class FlightMode {
         };
         if (p.power === 1) add(0, 0);
         else if (p.power === 2) { add(-0.4, 0); add(0.4, 0); }
-        else { add(0, 0); add(-0.5, -0.18); add(0.5, 0.18); if (p.power >= 4) { add(-0.9, -0.4); add(0.9, 0.4); } }
+        else { add(0, 0); add(-0.5, -0.14); add(0.5, 0.14); }
         sfx.laser();
       }
       if (inp.mega && p.mega >= 1) this.megaProut();
@@ -317,6 +380,7 @@ export class FlightMode {
         if (e.kind === 'boss' && Math.random() < dt * 6) { sfx.boom(); this.ctx.shake(0.3); }
         if (e.dying <= 0) {
           this.scene.remove(e.o, e.sh);
+          if (e.warn) this.scene.remove(e.warn);
           if (e.kind === 'boss' && !this.result) { this.result = { type: 'win' }; }
           return false;
         }
@@ -325,22 +389,40 @@ export class FlightMode {
       if (e.move === 'dive') { e.y -= 5.5 * Math.min(1.4, D.flightSpeed) * dt; e.x += Math.cos(e.t * 2.4 + e.ph) * e.wob * dt * 2; e.ang = Math.PI; }
       else if (e.move === 'swoop') { e.x += e.dir * 7 * dt; e.y = e.y0 - 0.06 * Math.pow(e.t * 7, 2) * 0.5; e.ang = Math.PI - e.dir * 0.7; }
       else if (e.move === 'hover') { if (e.t > 7) e.y -= 7 * dt; else if (e.y > e.ty) e.y -= 6 * dt; e.x += Math.sin(e.t * 1.3 + e.ph) * 2 * dt; e.ang = Math.PI; }
+      else if (e.move === 'cross') { e.x += e.dir * 8 * dt; e.ang = Math.PI / 2 * e.dir; }
+      else if (e.move === 'kami') {
+        if (!e.dash) {
+          e.ang = Math.PI;
+          if (e.y > e.ty) e.y -= 7 * dt;
+          else {
+            e.wait = (e.wait || 0) + dt;
+            e.flash = Math.sin(e.wait * 30) > 0 ? 0.05 : 0; // il clignote : « attention, j'arrive ! »
+            if (e.wait > 0.75) {
+              const a = Math.atan2(p.y - e.y, p.x - e.x);
+              e.dash = { vx: Math.cos(a) * 15, vy: Math.sin(a) * 15 }; e.ang = Math.PI / 2 - a; sfx.whoosh();
+            }
+          }
+        } else { e.x += e.dash.vx * dt; e.y += e.dash.vy * dt; }
+      }
       else if (e.move === 'boss') this.updateBoss(e, dt);
       // tirs
       if (e.move !== 'boss') {
         e.fireT -= dt;
-        if (e.fireT <= 0) {
-          e.fireT = rand(2, 3.4) / D.flightFire * (e.move === 'hover' ? 0.6 : 1);
-          if (e.y < this.Yh - 1 && e.y > -this.Yh * 0.2 && (e.move === 'hover' || Math.random() < 0.6)) this.eshot(e.x, e.y - 1, Math.atan2(p.y - e.y, p.x - e.x), D.flightBolt);
+        if (e.fireT <= 0 && e.move !== 'kami') {
+          e.fireT = rand(2, 3.4) / D.flightFire * (e.move === 'hover' ? 0.7 : 1);
+          const a = Math.atan2(p.y - e.y, p.x - e.x);
+          if (e.move === 'hover' && e.y < this.Yh - 1) for (const da of [-0.25, 0, 0.25]) this.eshot(e.x, e.y - 1, a + da, D.flightBolt);
+          else if (e.y < this.Yh - 1 && e.y > -this.Yh * 0.7 && Math.random() < 0.7) this.eshot(e.x, e.y - 1, a, D.flightBolt);
         }
       }
       this.wp(e.x, e.y, e.o.position);
       if (e.move !== 'boss') e.o.rotation.y = screenYaw(e.ang ?? Math.PI);
-      e.o.userData.mat.color.setScalar(e.flash > 0 ? 3 : 1);
+      if (e.o.userData.mat) e.o.userData.mat.color.setScalar(e.flash > 0 ? 3 : 1);
+      else if (e.o.userData.mats) for (const m of e.o.userData.mats) m.emissiveIntensity = e.flash > 0 ? 0.22 : 0;
       e.sh.position.set(e.o.position.x, 0.04, e.o.position.z);
       // touche Lucas en fonçant dedans
       if (this.hitTest(e, p.x, p.y, 0.8)) { this.hurt(); if (e.kind !== 'boss') { e.hp = 0; this.kill(e); } }
-      const out = e.y < -this.Yh - 4 || e.x < -this.Xw - 12 || e.x > this.Xw + 12;
+      const out = e.move !== 'boss' && (e.y < -this.Yh - 4 || e.y > this.Yh + 14 || e.x < -this.Xw - 12 || e.x > this.Xw + 12);
       if (out) { this.scene.remove(e.o, e.sh); return false; }
       return true;
     });
@@ -366,7 +448,7 @@ export class FlightMode {
       this.wp(b.x, b.y, b.g.position);
       b.g.children[1].rotation.y = screenYaw(Math.sin(b.t * 3) * 0.3);
       if (d < 1.3) {
-        if (b.kind === 'power') { p.power = Math.min(4, p.power + 1); sfx.pickup(); this.ctx.words.pop('TIR + !', this.wp(p.x, p.y).setY(ALT + 1.5), '#8fff5a', 1.2); }
+        if (b.kind === 'power') { p.power = Math.min(3, p.power + 1); sfx.pickup(); this.ctx.words.pop('TIR + !', this.wp(p.x, p.y).setY(ALT + 1.5), '#8fff5a', 1.2); }
         else { p.hp = Math.min(p.maxHp, p.hp + 1); sfx.heal(); this.ctx.hud.hearts(p.hp, p.maxHp); this.ctx.words.pop('+1 ❤', this.wp(p.x, p.y).setY(ALT + 1.5), '#ff6a8a', 1.2); }
         this.scene.remove(b.g); return false;
       }
@@ -401,26 +483,71 @@ export class FlightMode {
 
   updateBoss(e, dt) {
     const p = this.ship, D = this.ctx.diff;
-    if (e.y > this.Yh - 5.5) { e.y -= 3 * dt; return; }
-    e.x = Math.sin(e.t * 0.5) * (this.Xw - 3);
-    e.fanT -= dt;
-    if (e.fanT <= 0) {
-      e.fanT = 2.4 / D.flightFire;
-      const cy = e.y - 10.7 * 0.36;
-      const a = Math.atan2(p.y - cy, p.x - e.x);
-      for (let i = -2; i <= 2; i++) this.eshot(e.x + i * 0.5, cy, a + i * 0.22, D.flightBolt);
-    }
-    e.spawnT -= dt;
-    if (e.spawnT <= 0) {
-      e.spawnT = 7;
-      for (const o of [-3, 3]) this.addFlyer('rot', e.x + o, e.y, 'dive', { wob: 1 });
-    }
-    if (e.hp < e.maxHp * 0.5) {
-      e.spiralT -= dt;
-      if (e.spiralT <= 0) {
-        e.spiralT = 0.16;
-        e.spa = (e.spa || 0) + 0.5;
-        if (Math.floor(e.t / 3) % 2 === 0) for (let k = 0; k < 3; k++) this.eshot(e.x, e.y - 3.5, e.spa + k * 2.094, D.flightBolt * 0.8);
+    const top = this.Yh - 6.5; // hauteur normale (la cloche en haut de l'écran, le manche dépasse)
+    e.pt += dt;
+    const cup = this.bossCircles(e)[0];
+    const cupY = () => cup[1];
+    const fan = (n, spread) => {
+      const a = Math.atan2(p.y - (cupY() - 2.5), p.x - e.x);
+      for (let i = -(n - 1) / 2; i <= (n - 1) / 2; i++) this.eshot(cup[0] + i * 0.6, cupY() - 2.5, a + i * spread, D.flightBolt);
+    };
+    const go = (phase) => { e.phase = phase; e.pt = 0; };
+    const half = e.hp < e.maxHp * 0.5;
+    e.warn.material.opacity = 0;
+    switch (e.phase) {
+      case 'enter': if (e.y > top) e.y -= 4 * dt; else go('sway'); break;
+      case 'sway': { // se balance en tirant des éventails de bulles
+        e.x += (Math.sin(e.t * 0.6) * (this.Xw - 3.5) - e.x) * Math.min(1, dt * 2);
+        e.y += (top - e.y) * Math.min(1, dt * 2);
+        e.fanT -= dt;
+        if (e.fanT <= 0) { e.fanT = 2.2 / D.flightFire; fan(half ? 7 : 5, 0.2); }
+        e.spawnT -= dt;
+        if (e.spawnT <= 0) { e.spawnT = 8; this.rotWave(Math.random() < 0.5 ? 'kami' : 'lowLeft', 3); }
+        if (half) {
+          e.spiralT -= dt;
+          if (e.spiralT <= 0 && Math.floor(e.t / 3) % 2 === 0) { e.spiralT = 0.2; e.spa = (e.spa || 0) + 0.5; for (let k = 0; k < 3; k++) this.eshot(e.x, cupY() - 2.5, e.spa + k * 2.094, D.flightBolt * 0.75); }
+        }
+        e.plungeT -= dt; e.suckT -= dt;
+        if (half && e.suckT <= 0) { e.suckT = 13; go('suck'); this.ctx.words.pop('ELLE ASPIRE !', this.wp(p.x, p.y + 3).setY(ALT + 2), '#ff8a3d', 1.6); }
+        else if (e.plungeT <= 0) { e.plungeT = half ? 6 : 8; go('aim'); sfx.alarm(); }
+        break;
+      }
+      case 'aim': { // elle se place au-dessus de Lucas, la bande rouge clignote
+        e.x += (p.x - e.x) * Math.min(1, dt * 3);
+        e.y += (top + 1.5 - e.y) * Math.min(1, dt * 3);
+        const len = cupY() + this.Yh;
+        this.wp(e.x, cupY() - len / 2, e.warn.position).setY(ALT - 0.4);
+        e.warn.scale.set(6.6, 1, len);
+        e.warn.material.opacity = 0.25 + 0.2 * Math.sin(e.pt * 22);
+        e.o.rotation.z = Math.sin(e.pt * 30) * 0.05; // elle tremble avant de plonger
+        if (e.pt > 1.1) { go('plunge'); e.o.rotation.z = 0; sfx.whoosh(); }
+        break;
+      }
+      case 'plunge': // PLONK ! elle fonce vers le bas…
+        e.y -= 26 * dt;
+        if (cupY() - 3.2 < -this.Yh) {
+          go('back'); this.ctx.shake(0.7); sfx.boom();
+          this.ctx.words.pop('PLONK !', this.wp(e.x, cupY() - 2).setY(ALT + 2), '#ffd23f', 2);
+          fan(9, 0.3);
+        }
+        break;
+      case 'back': // … et remonte doucement
+        e.y += 7 * dt;
+        if (e.y >= top) go('sway');
+        break;
+      case 'suck': { // elle aspire Lucas vers sa cloche : il faut s'éloigner !
+        const dx = cup[0] - p.x, dy = cupY() - p.y, d = Math.hypot(dx, dy) || 1;
+        const pull = 6.5 * Math.min(1, e.pt / 0.5);
+        p.x += dx / d * pull * dt; p.y += dy / d * pull * dt;
+        if (Math.random() < 0.9) {
+          const a = rand(0, Math.PI * 2), r = rand(4, 9);
+          const w = this.wp(cup[0] + Math.cos(a) * r, cupY() + Math.sin(a) * r);
+          const c = this.wp(cup[0], cupY());
+          this.ctx.puffs.emit(w.x, ALT, w.z, 0xdff4ff, { vx: (c.x - w.x) * 2, vz: (c.z - w.z) * 2, life: 0.5, s0: 0.6, s1: 0.2, drag: 0 });
+        }
+        if (Math.floor(e.pt * 4) !== Math.floor((e.pt - dt) * 4)) sfx.suck();
+        if (e.pt > 3) go('sway');
+        break;
       }
     }
   }
@@ -449,7 +576,7 @@ export class FlightMode {
   }
 
   dispose() {
-    for (const e of this.enemies) { if (e.o) this.scene.remove(e.o, e.sh); if (e.g) this.scene.remove(e.g); }
+    for (const e of this.enemies) { if (e.o) this.scene.remove(e.o, e.sh); if (e.g) this.scene.remove(e.g); if (e.warn) this.scene.remove(e.warn); }
     for (const s of [...this.shots, ...this.pickups]) this.scene.remove(s.o || s.g);
     for (const s of this.eshots) this.scene.remove(s.g);
     for (const d of this.decor) this.scene.remove(d);
