@@ -174,7 +174,7 @@ const ANIMS = {
   idle: 'Idle', run: 'Running_A', walk: 'Walking_B', guard: '2H_Melee_Idle', block: 'Blocking', blockHit: 'Block_Hit',
   atk1: '1H_Melee_Attack_Slice_Diagonal', atk2: '1H_Melee_Attack_Slice_Horizontal', atk3: '1H_Melee_Attack_Chop',
   stab: '1H_Melee_Attack_Stab', spin: '2H_Melee_Attack_Spin', heavy: '2H_Melee_Attack_Chop',
-  hit: 'Hit_A', hit2: 'Hit_B', death: 'Death_A', cheer: 'Cheer', dodge: 'Dodge_Forward', jump: 'Jump_Full_Short',
+  hit: 'Hit_A', hit2: 'Hit_B', death: 'Death_A', cheer: 'Cheer', dodge: 'Dodge_Forward', jump: 'Jump_Full_Short', jumpAir: 'Jump_Idle', jumpLand: 'Jump_Land',
   aim: '1H_Ranged_Aiming', shoot: '1H_Ranged_Shoot', spell: 'Spellcast_Shoot', throw: 'Throw', interact: 'Interact',
 };
 const LOOPS = new Set(['idle', 'run', 'walk', 'guard', 'block', 'aim']);

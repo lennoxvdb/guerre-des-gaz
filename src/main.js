@@ -80,9 +80,9 @@ function placeCamera(dt) {
 }
 
 // ---------------- commandes ----------------
-const input = { move: { x: 0, y: 0 }, drag: { x: 0, y: 0 }, attack: false, block: false, mega: false, action: false };
+const input = { move: { x: 0, y: 0 }, drag: { x: 0, y: 0 }, attack: false, block: false, mega: false, action: false, jump: false };
 const keys = new Set();
-const KEYS = { attack: ['Space', 'KeyJ'], block: ['ShiftLeft', 'ShiftRight', 'KeyK'], mega: ['KeyE', 'KeyL'], action: ['KeyF', 'Enter'] };
+const KEYS = { attack: ['Space', 'KeyJ'], block: ['ShiftLeft', 'ShiftRight', 'KeyK'], mega: ['KeyE', 'KeyL'], action: ['KeyF', 'Enter'], jump: ['KeyX', 'KeyC'] };
 addEventListener('keydown', (e) => {
   if (e.repeat) return;
   keys.add(e.code);
@@ -90,6 +90,7 @@ addEventListener('keydown', (e) => {
   if (KEYS.attack.includes(e.code)) input.attack = true;
   if (KEYS.mega.includes(e.code)) input.mega = true;
   if (KEYS.action.includes(e.code)) input.action = true;
+  if (KEYS.jump.includes(e.code)) input.jump = true;
   if ((e.code === 'Escape' || e.code === 'KeyP') && state === 'play') pause();
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
 });
@@ -104,19 +105,29 @@ function local(e) {
   const s = r.width / gameEl.offsetWidth || 1;
   return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s, s };
 }
+// À pied : toucher un soldat = Lucas court le frapper ; toucher le sol = il y court ;
+// glisser le doigt = joystick (il apparaît là où le doigt a commencé).
+let press = null;
+const TAP_MOVE = 14, TAP_TIME = 380;
 gameEl.addEventListener('pointerdown', (e) => {
   unlock();
   if (state !== 'play' || paused || e.target.closest('button')) return;
   const p = local(e);
   if (modeName === 'flight') { drag = { id: e.pointerId, x: p.x, y: p.y }; $('flightHelp').classList.add('hidden'); return; }
-  if (joy.on) return;
-  Object.assign(joy, { on: true, id: e.pointerId, ox: p.x, oy: p.y, x: 0, y: 0 });
-  const j = $('joy'); j.style.left = p.x + 'px'; j.style.top = p.y + 'px'; j.classList.remove('hidden');
-  $('joyKnob').style.transform = '';
+  if (joy.on || press) return;
+  press = { id: e.pointerId, x: p.x, y: p.y, t: performance.now() };
 });
+function startJoy(x, y, id) {
+  Object.assign(joy, { on: true, id, ox: x, oy: y, x: 0, y: 0 });
+  const j = $('joy'); j.style.left = x + 'px'; j.style.top = y + 'px'; j.classList.remove('hidden');
+  $('joyKnob').style.transform = '';
+}
 gameEl.addEventListener('pointermove', (e) => {
   const p = local(e);
   if (drag && e.pointerId === drag.id) { input.drag.x += p.x - drag.x; input.drag.y -= p.y - drag.y; drag.x = p.x; drag.y = p.y; return; }
+  if (press && e.pointerId === press.id && Math.hypot(p.x - press.x, p.y - press.y) > TAP_MOVE) {
+    startJoy(press.x, press.y, press.id); press = null;
+  }
   if (!joy.on || e.pointerId !== joy.id) return;
   let dx = p.x - joy.ox, dy = p.y - joy.oy;
   const len = Math.hypot(dx, dy);
@@ -131,8 +142,34 @@ gameEl.addEventListener('pointermove', (e) => {
 });
 const pointerEnd = (e) => {
   if (drag && e.pointerId === drag.id) drag = null;
+  if (press && e.pointerId === press.id) {
+    if (e.type === 'pointerup' && performance.now() - press.t < TAP_TIME && state === 'play' && !paused && modeName === 'foot') tapAt(press.x, press.y);
+    press = null;
+  }
   if (joy.on && e.pointerId === joy.id) { joy.on = false; joy.x = joy.y = 0; $('joy').classList.add('hidden'); }
 };
+// qu'y a-t-il sous le doigt ? un ennemi (le plus proche à l'écran), sinon un point du sol
+const _ray = new THREE.Raycaster(), _ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _v = new THREE.Vector3();
+function tapAt(x, y) {
+  // zone de toucher large : un doigt d'enfant n'est pas précis
+  let best = null, bestD = Math.max(70, GW * 0.14);
+  for (const en of mode.enemies) {
+    if (en.dead || en.state === 'drop') continue;
+    _v.copy(en.pos).setY(en.kind === 'roteur' ? 1.6 : 0.9).project(camera);
+    const d = Math.hypot((_v.x + 1) / 2 * GW - x, (1 - _v.y) / 2 * GH - y);
+    const r = en.kind === 'roteur' ? bestD * 1.5 : bestD;
+    if (d < r && (!best || d < best.d)) best = { en, d };
+  }
+  if (best) { mode.attackTarget(best.en); return; }
+  _ray.setFromCamera(new THREE.Vector2(x / GW * 2 - 1, -(y / GH) * 2 + 1), camera);
+  if (!_ray.ray.intersectPlane(_ground, _v)) return;
+  // le sol juste à côté d'un soldat : c'est lui qu'on voulait
+  for (const en of mode.enemies) {
+    if (en.dead || en.state === 'drop') continue;
+    if (Math.hypot(en.pos.x - _v.x, en.pos.z - _v.z) < 2.6 + en.r) { mode.attackTarget(en); return; }
+  }
+  mode.walkTo(_v.clone());
+}
 gameEl.addEventListener('pointerup', pointerEnd);
 gameEl.addEventListener('pointercancel', pointerEnd);
 
@@ -144,6 +181,7 @@ function holdButton(id, onDown, onUp) {
 }
 let blockBtn = false;
 holdButton('btnAtk', () => { input.attack = true; });
+holdButton('btnJump', () => { input.jump = true; });
 holdButton('btnBlock', () => { blockBtn = true; }, () => { blockBtn = false; });
 holdButton('btnMega', () => { input.mega = true; });
 holdButton('btnAct', () => { input.action = true; });
@@ -163,18 +201,19 @@ function readInput() {
   input.move.x = x; input.move.y = y;
   input.block = blockBtn || KEYS.block.some((k) => keys.has(k));
 }
-function clearEdges() { input.attack = input.mega = input.action = false; input.drag.x = input.drag.y = 0; }
+function clearEdges() { input.attack = input.mega = input.action = input.jump = false; input.drag.x = input.drag.y = 0; }
 
 // ---------------- HUD ----------------
 const NAMES = { lucas: 'Lucas', lucas_rire: 'Lucas', roteur: 'Dark Roteur', gazou: 'Maître Gazou', hanpopo: 'Han Popo', pqr: 'P-QR', r2wc: 'R2-WC', soldat: 'Soldat' };
 const portrait = (who) => `assets/portraits/${who === 'lucas_rire' ? 'lucas' : who}.webp`;
 let radioT = 0, bannerT = 0, pointerTarget = null;
 const TIPS = {
-  atk: () => touchDevice ? 'Touche ⚔️ pour frapper avec ton sabre-gaz !' : 'Espace (ou ⚔️) pour frapper avec ton sabre-gaz !',
+  atk: () => touchDevice ? 'Touche un soldat avec ton doigt (ou ⚔️) : Lucas le frappe au sabre-gaz !' : 'Clique sur un soldat (ou Espace, ou ⚔️) : Lucas le frappe au sabre-gaz !',
   block: () => touchDevice ? 'Garde 🛡️ appuyé pour parer et renvoyer les tirs !' : 'Garde Maj (ou 🛡️) appuyé pour parer et renvoyer les tirs !',
   mega: () => touchDevice ? 'Ta jauge est pleine : touche 💨 !' : 'Ta jauge est pleine : touche E (ou 💨) !',
+  jump: () => touchDevice ? 'Touche 🌀 SAUT pour bondir comme un chevalier !' : 'Touche X (ou 🌀 SAUT) pour bondir comme un chevalier !',
 };
-const BTN = { atk: 'btnAtk', block: 'btnBlock', mega: 'btnMega' };
+const BTN = { atk: 'btnAtk', block: 'btnBlock', mega: 'btnMega', jump: 'btnJump' };
 const hud = {
   hearts(hp, max) { $('hearts').innerHTML = Array.from({ length: max }, (_, i) => `<span class="${i < hp ? '' : 'off'}">❤️</span>`).join(''); },
   mega(k) { $('megaFill').style.height = Math.round(Math.min(1, k) * 100) + '%'; $('btnMega').classList.toggle('full', k >= 1); },
@@ -192,9 +231,9 @@ const hud = {
   },
   banner(text, dur = 2) { const b = $('banner'); b.textContent = text; b.classList.remove('hidden'); bannerT = dur; },
   tip(which) {
-    for (const id of Object.values(BTN)) $(id).classList.remove('hl');
+    for (const id of Object.values(BTN)) if (id) $(id).classList.remove('hl');
     if (!which) { $('tip').classList.add('hidden'); return; }
-    $(BTN[which]).classList.add('hl');
+    if (BTN[which]) $(BTN[which]).classList.add('hl');
     $('tip').textContent = TIPS[which](); $('tip').classList.remove('hidden');
   },
   action(label) { $('btnAct').classList.toggle('hidden', !label); if (label) $('actLabel').textContent = label; },

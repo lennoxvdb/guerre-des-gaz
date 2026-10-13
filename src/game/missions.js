@@ -55,7 +55,7 @@ export function* footSablon(g) {
   const hud = g.ctx.hud;
   hud.objective('Écoute Maître Gazou');
   yield 1;
-  g.say('gazou', 'Ton sabre-gaz, essaie ! Appuie sur ⚔ pour frapper.', 4);
+  g.say('gazou', 'Ton sabre-gaz, essaie ! Touche un soldat avec ton doigt, et Lucas le frappera.', 4.5);
   hud.tip('atk');
   yield 2;
   hud.objective('Chasse les soldats !');
@@ -68,10 +68,12 @@ export function* footSablon(g) {
   g.dropGroup(['tireur', 'tireur', 'tireur'], null, 8);
   yield 1.5; yield g.clear();
   hud.tip(null);
-  g.say('hanpopo', 'Des Rot-fighters arrivent ! Sors vite des cercles rouges, gamin !', 4);
+  g.say('hanpopo', 'Des Rot-fighters arrivent ! Sors des cercles rouges… ou saute par-dessus avec 🌀, comme un chevalier !', 4.5);
+  hud.tip('jump');
   hud.objective('Évite les bombes !');
   yield 1.5;
   g.strafe(); yield 3.5; g.strafe(); yield 3;
+  hud.tip(null);
   hud.objective('Chasse les soldats !');
   g.dropGroup(['ventouse', 'tireur', 'ventouse', 'tireur'], null, 7);
   yield 2;

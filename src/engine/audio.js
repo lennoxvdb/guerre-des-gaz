@@ -146,6 +146,18 @@ export const sfx = {
     noise(t, 0.7, 500, 0.8, 0.4, 'lowpass', sfxBus, 80);
     tone(t, 0.6, 120, 35, 0.35, 'sine');
   },
+  jump() { // propulsé par un prout
+    if (!ok('jump', 0.2)) return;
+    const t = now();
+    fart(t, 0.35, 260, 120, 0.3, 32);
+    noise(t, 0.4, 500, 1.5, 0.15, 'bandpass', sfxBus, 2500);
+  },
+  land() {
+    if (!ok('land', 0.2)) return;
+    const t = now();
+    tone(t, 0.25, 130, 45, 0.4, 'sine');
+    noise(t, 0.25, 400, 1, 0.2, 'lowpass', sfxBus, 100);
+  },
   pickup() {
     if (!ok('pickup', 0.05)) return;
     const t = now();

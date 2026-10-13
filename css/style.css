@@ -128,7 +128,8 @@ body.phone #controls { bottom: 30px; right: 22px; }
 #btnMega.full { animation: glow 0.7s ease-in-out infinite alternate; }
 #btnMega:not(.full) { opacity: .85; }
 @keyframes glow { from { box-shadow: 0 5px 0 var(--ink), 0 0 0 0 rgba(143,255,90,.8); } to { box-shadow: 0 5px 0 var(--ink), 0 0 0 12px rgba(143,255,90,0); } }
-#btnAct { right: 100px; bottom: 110px; width: 96px; height: 96px; background: radial-gradient(circle at 40% 35%, #ffe68a, #ff9a2a); animation: glow 0.6s ease-in-out infinite alternate; }
+#btnJump { right: 120px; bottom: 98px; width: 72px; height: 72px; background: radial-gradient(circle at 40% 35%, #ffe68a, #f0a020); }
+#btnAct { right: 200px; bottom: 20px; width: 96px; height: 96px; background: radial-gradient(circle at 40% 35%, #ffe68a, #ff9a2a); animation: glow 0.6s ease-in-out infinite alternate; }
 #hud.flight .footOnly { display: none; }
 #hud.flight #btnMega { right: 0; bottom: 0; width: 96px; height: 96px; }
 .ctl.hl { animation: hl .5s ease-in-out infinite alternate; }

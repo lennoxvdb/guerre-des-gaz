@@ -28,6 +28,8 @@ export class FootMode {
       hp: ctx.diff.hp, maxHp: ctx.diff.hp, inv: 0, mega: opts.mega ?? 0,
       stage: 0, atkT: 0, atkLen: 0, hitAt: 0, hitDone: true, queued: false, comboT: 0,
       blocking: false, special: 0, dead: false, deadT: 0, cheer: false,
+      target: null, moveTo: null, // ce qu'on a touché du doigt
+      jumpT: 0, jumpLen: 0.8, jumpCool: 0, jumpFrom: V(), jumpTo: V(), // le saut de chevalier
     };
     h.f.root.position.copy(h.pos);
     h.f.yaw = Math.PI * 1.25; // regarde vers le haut de l'écran
@@ -35,6 +37,14 @@ export class FootMode {
     this.saberOn = 0;
     this.trail = new SaberTrail(this.scene, 0x8fff5a);
     this.camPos = h.pos.clone();
+    // cercle sous l'ennemi qu'on a touché, et petit cercle là où on a touché le sol
+    this.marker = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 40).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xff4a3a, transparent: true, opacity: 0.85, depthWrite: false }));
+    this.marker.renderOrder = 3; this.marker.visible = false;
+    this.dot = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.45, 28).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x8fff5a, transparent: true, opacity: 0, depthWrite: false }));
+    this.dot.renderOrder = 3;
+    this.scene.add(this.marker, this.dot);
     this.script = opts.script ? new Script(opts.script(this)) : null;
     ctx.hud.hearts(h.hp, h.maxHp);
     ctx.hud.mega(h.mega);
@@ -170,6 +180,60 @@ export class FootMode {
     this.ctx.glows.burst(b.g.position.x, 1.2, b.g.position.z, 0x8fff5a, 8, 4, { life: 0.3, s0: 0.3, s1: 0.1 });
   }
 
+  // ---------- commandes au doigt ----------
+  attackTarget(e) {
+    const h = this.hero;
+    if (h.dead || h.cheer) return;
+    h.target = e; h.moveTo = null;
+    this.ctx.hud.tip(null);
+  }
+  walkTo(p) {
+    const h = this.hero;
+    if (h.dead || h.cheer) return;
+    h.target = null; h.moveTo = p.setY(0);
+    this.dot.position.set(p.x, 0.06, p.z); this.dot.material.opacity = 0.9; this.dot.scale.setScalar(1.6);
+  }
+
+  // ---------- le saut de chevalier (propulsé au prout, avec une pirouette) ----------
+  startJump(dir) {
+    const h = this.hero;
+    h.jumpT = h.jumpLen; h.jumpCool = 1.1; h.atkT = 0; h.queued = false;
+    h.jumpFrom.copy(h.pos);
+    if (h.target && !h.target.dead) { // bond sur la cible
+      const d = dist2(h.target.pos, h.pos);
+      const k = Math.max(0, d - 1.4 - h.target.r) / (d || 1);
+      h.jumpTo.copy(h.pos).lerp(h.target.pos, Math.min(1, k)).setY(0);
+      if (d - 1.4 - h.target.r > 7) h.jumpTo.copy(h.pos).addScaledVector(_a.copy(h.target.pos).sub(h.pos).setY(0).normalize(), 7);
+    } else {
+      const fwd = dir && dir.lengthSq() > 0.02 ? dir.clone().normalize() : this.heroFacing().clone();
+      h.jumpTo.copy(h.pos).addScaledVector(fwd, 5.5);
+    }
+    this.collide(h.jumpTo, 0.6);
+    h.f.yaw = yawOf(h.jumpTo.x - h.pos.x, h.jumpTo.z - h.pos.z) || h.f.yaw;
+    h.f.play('jumpAir', 1, 1);
+    sfx.jump();
+    for (let i = 0; i < 12; i++) this.ctx.puffs.emit(h.pos.x, 0.4, h.pos.z, i % 2 ? 0x9be36b : 0xc8f59a, { vx: rand(-3, 3), vz: rand(-3, 3), vy: 1, life: 0.7, s0: 0.6, s1: 1.8 });
+    this.ctx.words.pop('HOP !', h.pos.clone().setY(2.6), '#ffd23f', 1.1);
+  }
+  land() {
+    const h = this.hero, f = h.f;
+    f.model.rotation.x = 0; f.model.position.set(0, 0, 0); f.root.position.y = 0;
+    f.play('jumpLand', 1.4, 0.7);
+    sfx.land(); this.ctx.shake(0.35);
+    for (let i = 0; i < 24; i++) {
+      const a = i / 24 * Math.PI * 2;
+      this.ctx.puffs.emit(h.pos.x, 0.3, h.pos.z, i % 2 ? 0x9be36b : 0xe8d6a8, { vx: Math.cos(a) * 7, vz: Math.sin(a) * 7, life: 0.6, s0: 0.6, s1: 1.6, drag: 3 });
+    }
+    // l'onde de gaz repousse ceux qui sont tout près
+    for (const e of this.enemies) {
+      if (e.dead || e.state === 'drop') continue;
+      const d = dist2(e.pos, h.pos);
+      if (d < 2.6 + e.r) this.damage(e, 1, _a.copy(e.pos).sub(h.pos).setY(0).normalize(), 9);
+    }
+    // si on a bondi sur quelqu'un : grand coup de sabre en arrivant
+    if (h.target && !h.target.dead) { h.stage = 2; this.startSwing(); }
+  }
+
   // ---------- Lucas ----------
   heroFacing() { return _c.set(Math.sin(this.hero.f.yaw), 0, Math.cos(this.hero.f.yaw)); }
 
@@ -189,7 +253,7 @@ export class FootMode {
     const n = names[h.stage];
     h.atkLen = h.f.play(n, 1.7, 0.78);
     h.atkT = h.atkLen; h.hitAt = h.atkLen * 0.62; h.hitDone = false; h.queued = false;
-    const tgt = this.nearestEnemy(6.5);
+    const tgt = h.target && !h.target.dead ? h.target : this.nearestEnemy(6.5);
     if (tgt) {
       h.f.yaw = yawOf(tgt.pos.x - h.pos.x, tgt.pos.z - h.pos.z);
       const d = dist2(tgt.pos, h.pos);
@@ -258,7 +322,7 @@ export class FootMode {
 
   hurtHero(n, from) {
     const h = this.hero;
-    if (h.inv > 0 || h.dead || h.special > 0) return;
+    if (h.inv > 0 || h.dead || h.special > 0 || h.jumpT > 0) return;
     h.hp -= n; h.inv = 1.3;
     h.f.flash = 1; h.f.play('hit', 1.4);
     if (from) h.knock.add(_a.copy(h.pos).sub(from).setY(0).normalize().multiplyScalar(7));
@@ -309,13 +373,48 @@ export class FootMode {
       if (h.deadT > 2.2 && !this.result) this.result = { type: 'dead' };
       return;
     }
-    h.inv -= dt; h.special -= dt; h.comboT -= dt;
+    h.inv -= dt; h.special -= dt; h.comboT -= dt; h.jumpCool -= dt;
+    if (h.jumpT > 0) {
+      h.jumpT -= dt;
+      const k = Math.min(1, 1 - h.jumpT / h.jumpLen), e = k * (2 - k);
+      h.pos.lerpVectors(h.jumpFrom, h.jumpTo, e);
+      const y = Math.sin(Math.PI * k) * 2.6;
+      f.root.position.copy(h.pos); f.root.position.y = y;
+      // pirouette vers l'avant autour de la taille
+      const th = Math.min(1, k * 1.15) * Math.PI * 2, c = 1.0;
+      f.model.rotation.x = th; f.model.position.set(0, c - c * Math.cos(th), -c * Math.sin(th));
+      if (Math.random() < 0.8) this.ctx.puffs.emit(h.pos.x, y + 0.3, h.pos.z, 0x9be36b, { vy: -2, life: 0.5, s0: 0.5, s1: 1.2 });
+      f.root.visible = true;
+      f.update(dt);
+      f.saberEnds(_a, _b); this.trail.push(_a, _b, true);
+      if (h.jumpT <= 0) this.land();
+      return;
+    }
     // allumer le sabre au début
     if (this.saberOn < 1) { if (this.saberOn === 0) sfx.ignite(); this.saberOn = Math.min(1, this.saberOn + dt * 3); f.setSaberOn(this.saberOn); }
 
     // déplacement (joystick ou flèches) : sur l'écran → sur le sol
     const mv = _b.set(0, 0, 0).addScaledVector(SR, inp.move.x).addScaledVector(SU, inp.move.y);
-    const mag = Math.min(1, mv.length());
+    let mag = Math.min(1, mv.length());
+    // joystick ou flèches : on oublie ce qu'on avait touché du doigt
+    if (mag > 0.15) { h.target = null; h.moveTo = null; }
+    if (h.target && (h.target.dead || h.target.state === 'drop')) h.target = null;
+    if (!h.target && !h.moveTo && mag < 0.15 && !inp.block) {
+      for (const e of this.enemies) if (!e.dead && e.kind !== 'roteur' && e.state !== 'drop' && dist2(e.pos, h.pos) < 2.3 + e.r) { h.target = e; break; }
+    }
+    let autoAtk = false;
+    if (h.target) {
+      const dx = h.target.pos.x - h.pos.x, dz = h.target.pos.z - h.pos.z, d = Math.hypot(dx, dz);
+      if (d > 1.7 + h.target.r) { mv.set(dx / d, 0, dz / d); mag = 1; }
+      else autoAtk = !inp.block;
+      if (d < 4 + h.target.r) autoAtk = autoAtk || (!inp.block && h.atkT > 0);
+    } else if (h.moveTo) {
+      const dx = h.moveTo.x - h.pos.x, dz = h.moveTo.z - h.pos.z, d = Math.hypot(dx, dz);
+      if (d < 0.35) h.moveTo = null;
+      else { mv.set(dx / d, 0, dz / d); mag = Math.min(1, d * 1.5); mv.multiplyScalar(mag); }
+    }
+    const wantAtk = inp.attack || autoAtk;
+    if (inp.jump && h.jumpCool <= 0 && h.special <= 0 && !h.cheer) { this.startJump(mag > 0.15 ? mv : null); return; }
     h.blocking = inp.block && h.atkT <= 0 && h.special <= 0 && !h.cheer;
     let speed = 6.8;
     if (h.blocking) speed = 2.6;
@@ -327,13 +426,13 @@ export class FootMode {
     if (h.atkT > 0) {
       h.atkT -= dt;
       if (!h.hitDone && h.atkT <= h.hitAt) { h.hitDone = true; this.swingHits(); }
-      if (inp.attack && h.atkT < h.atkLen * 0.6) h.queued = true;
+      if (wantAtk && h.atkT < h.atkLen * 0.6) h.queued = true;
       if (h.atkT <= 0) {
         h.comboT = 0.45;
-        if (h.queued && h.stage < 2) { h.stage++; this.startSwing(); }
+        if (h.queued) { h.stage = (h.stage + 1) % 3; this.startSwing(); }
         else h.stage = h.stage >= 2 ? 0 : h.stage + 1;
       }
-    } else if (inp.attack && h.special <= 0 && !h.cheer) {
+    } else if (wantAtk && h.special <= 0 && !h.cheer) {
       if (h.comboT <= 0) h.stage = 0;
       this.startSwing();
     }
@@ -658,7 +757,7 @@ export class FootMode {
       b.glow.material.rotation += dt * 5;
       if (Math.random() < 0.5) this.ctx.glows.emit(b.g.position.x, 1.2, b.g.position.z, b.reflected ? 0x8fff5a : 0xb04cff, { life: 0.25, s0: 0.5, s1: 0.1 });
       let gone = b.life <= 0;
-      if (!gone && !b.reflected && !h.dead) {
+      if (!gone && !b.reflected && !h.dead && h.jumpT <= 0) {
         const d = dist2(b.g.position, h.pos);
         if (d < 1.1) {
           const facing = this.heroFacing();
@@ -711,7 +810,8 @@ export class FootMode {
       const d = dist2(x.pos, h.pos);
       if (!x.hit && Math.abs(d - x.r) < 0.8) {
         x.hit = true;
-        if (h.blocking) { this.ctx.words.pop('PARÉ !', h.pos.clone().setY(2.8), '#8fff5a', 1.2); sfx.clash(); }
+        if (h.jumpT > 0) this.ctx.words.pop('RATÉ !', h.pos.clone().setY(3.4), '#8fff5a', 1.2);
+        else if (h.blocking) { this.ctx.words.pop('PARÉ !', h.pos.clone().setY(2.8), '#8fff5a', 1.2); sfx.clash(); }
         else this.hurtHero(1, x.pos);
       }
       if (x.r > 11) { this.scene.remove(x.mesh); return false; }
@@ -734,6 +834,19 @@ export class FootMode {
       return true;
     });
 
+    // repères au sol
+    const tg = h.target;
+    this.marker.visible = !!tg;
+    if (tg) {
+      this.marker.position.set(tg.pos.x, 0.06, tg.pos.z);
+      this.marker.scale.setScalar((tg.kind === 'roteur' ? 1.6 : 1.05) * (1 + Math.sin(this.t * 8) * 0.08));
+    }
+    if (this.dot.material.opacity > 0) {
+      this.dot.material.opacity = Math.max(0, this.dot.material.opacity - dt * 1.6);
+      this.dot.scale.setScalar(Math.max(0.6, this.dot.scale.x - dt * 2));
+      if (!h.moveTo) this.dot.material.opacity = Math.min(this.dot.material.opacity, 0.3);
+    }
+
     // caméra : suit Lucas en douceur
     this.camPos.lerp(h.pos, Math.min(1, dt * 5));
     this.ctx.cam.target.copy(this.camPos).setY(1);
@@ -747,7 +860,7 @@ export class FootMode {
     for (const s of this.strafes) { this.scene.remove(s.ship, s.shadow); for (const im of s.impacts) this.scene.remove(im.w); }
     for (const p of this.pickups) this.scene.remove(p.g);
     for (const x of this.fx) this.scene.remove(x.mesh);
-    this.scene.remove(this.hero.f.root);
+    this.scene.remove(this.hero.f.root, this.marker, this.dot);
     this.trail.dispose(this.scene);
   }
 }
