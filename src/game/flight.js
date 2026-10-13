@@ -2,8 +2,9 @@
 // Les vaisseaux volent sur un « plafond » à hauteur ALT ; les canons sont au sol.
 // Toutes les collisions se font comme on les voit sur l'écran.
 import * as THREE from 'three';
-import { TEX, flatSprite, shadowBlob, glowSprite, screenYaw, toon, rng, outlineGeo, outlineMat } from '../engine/gfx.js';
+import { TEX, flatSprite, shadowBlob, glowSprite, screenYaw, toon, rng } from '../engine/gfx.js';
 import { flightDecor } from '../world/world.js';
+import { makePlunger } from '../entities/plunger.js';
 import { sfx } from '../engine/audio.js';
 import { SR, SU, rand, clamp, pick, Script } from './common.js';
 
@@ -22,54 +23,7 @@ const VIEW = FLIGHT_OFF.clone().normalize().negate(); // la direction du regard 
 const V = () => new THREE.Vector3();
 const _a = V();
 
-// Le Croiseur-Ventouse en 3D : une vraie ventouse de toilettes (cloche en caoutchouc rouge tournée vers
-// Lucas, long manche en bois) avec des réacteurs violets et des canons. Couchée sur le « plafond » du vol.
-function makePlunger() {
-  const g = new THREE.Group();
-  const mats = [];
-  const M = (color) => { const m = new THREE.MeshToonMaterial({ color, emissive: 0xffffff, emissiveIntensity: 0 }); mats.push(m); return m; };
-  // une pièce et son contour foncé, ensemble (pour qu'ils bougent ensemble)
-  const add = (geo, mat, outline = 0.08) => {
-    const part = new THREE.Group();
-    const m = new THREE.Mesh(geo, mat); m.castShadow = true; part.add(m);
-    if (outline) part.add(new THREE.Mesh(outlineGeo(geo, outline), outlineMat));
-    g.add(part);
-    return part;
-  };
-  // la cloche : profil tourné autour de l'axe, ouverture vers +z (vers le bas de l'écran, vers Lucas)
-  const prof = [[0.55, -0.2], [0.9, 0.1], [1.7, 0.6], [2.5, 1.4], [3.0, 2.3], [3.2, 2.9], [3.35, 3.2]].map(([r, y]) => new THREE.Vector2(r, y));
-  add(new THREE.LatheGeometry(prof, 40).rotateX(Math.PI / 2), M(0xd8343a), 0.1);
-  g.add(new THREE.Mesh(new THREE.LatheGeometry(prof.map((v) => new THREE.Vector2(v.x * 0.95, v.y)), 40).rotateX(Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: 0x4a0f18, side: THREE.BackSide })));
-  const rim = add(new THREE.TorusGeometry(3.3, 0.28, 10, 44), M(0xa8222a), 0.05);
-  rim.position.z = 3.2;
-  // reflet du caoutchouc
-  const shine = new THREE.Mesh(new THREE.TorusGeometry(2.3, 0.12, 6, 30, 1.6), new THREE.MeshBasicMaterial({ color: 0xff9a9a }));
-  shine.position.set(0, 0, 1.4); shine.rotation.z = 2.2; g.add(shine);
-  // le manche en bois, avec des bagues
-  const handle = add(new THREE.CylinderGeometry(0.5, 0.5, 8.4, 16).rotateX(Math.PI / 2), M(0xc8894a));
-  handle.position.z = -4.4;
-  for (const z of [-1.6, -4.4, -7.2]) {
-    const ring = add(new THREE.CylinderGeometry(0.58, 0.58, 0.35, 16).rotateX(Math.PI / 2), M(0x5a3a66), 0.04);
-    ring.position.z = z;
-  }
-  const knob = add(new THREE.SphereGeometry(0.8, 16, 12), M(0x5a3a66));
-  knob.position.z = -8.8;
-  // réacteurs violets au bout du manche, petites ailes, canons sur le bord de la cloche
-  for (const sx of [-1, 1]) {
-    const pod = add(new THREE.CapsuleGeometry(0.42, 1.4, 4, 10).rotateX(Math.PI / 2), M(0x6e6e80), 0.05);
-    pod.position.set(sx * 1.35, 0, -7.6);
-    const wing = add(new THREE.BoxGeometry(1.0, 0.18, 1.6), M(0x8a5ab0), 0.04);
-    wing.position.set(sx * 0.85, 0, -7.4);
-    const fire = glowSprite(0xb04cff, 2.2, 0.9); fire.position.set(sx * 1.35, 0, -8.9); g.add(fire);
-    const gun = add(new THREE.CylinderGeometry(0.22, 0.3, 1.2, 10).rotateX(Math.PI / 2), M(0x3a2848), 0.04);
-    gun.position.set(sx * 2.4, 1.6, 2.6);
-  }
-  g.userData.mats = mats;
-  return g;
-}
-
-const BOSS_PTS = [[1.8, 3.0], [-2.5, 0.8], [-5.5, 0.8], [-8.8, 1.0]];
+const BOSS_PTS = [[1.8, 3.3], [-2.5, 0.9], [-5.5, 1.1], [-8.0, 2.4]];
 
 export class FlightMode {
   constructor(ctx, opts) {
@@ -418,7 +372,7 @@ export class FlightMode {
       this.wp(e.x, e.y, e.o.position);
       if (e.move !== 'boss') e.o.rotation.y = screenYaw(e.ang ?? Math.PI);
       if (e.o.userData.mat) e.o.userData.mat.color.setScalar(e.flash > 0 ? 3 : 1);
-      else if (e.o.userData.mats) for (const m of e.o.userData.mats) m.emissiveIntensity = e.flash > 0 ? 0.22 : 0;
+      else if (e.o.userData.mats) for (const m of e.o.userData.mats) m.emissiveIntensity = e.flash > 0 ? 0.1 : m.userData.base || 0;
       e.sh.position.set(e.o.position.x, 0.04, e.o.position.z);
       // touche Lucas en fonçant dedans
       if (this.hitTest(e, p.x, p.y, 0.8)) { this.hurt(); if (e.kind !== 'boss') { e.hp = 0; this.kill(e); } }
@@ -485,6 +439,7 @@ export class FlightMode {
     const p = this.ship, D = this.ctx.diff;
     const top = this.Yh - 6.5; // hauteur normale (la cloche en haut de l'écran, le manche dépasse)
     e.pt += dt;
+    e.o.userData.anim(this.t);
     const cup = this.bossCircles(e)[0];
     const cupY = () => cup[1];
     const fan = (n, spread) => {
