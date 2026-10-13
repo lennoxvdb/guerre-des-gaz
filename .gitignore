@@ -1,2 +1,9 @@
 node_modules/
-*.apk
+www/
+publication/*.apk
+publication/*.aab
+*.jks
+*.keystore
+mot-de-passe*.txt
+__pycache__/
+.claude/
