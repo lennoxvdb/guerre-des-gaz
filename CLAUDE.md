@@ -249,4 +249,4 @@ Fichiers :
   ne jamais afficher le mot de passe). Garder cette clé : sans elle, impossible de mettre à jour l'appli.
 - Puis : `gh release create v1.0.N publication/guerre-des-gaz.apk --repo lennoxvdb/guerre-des-gaz …`
 - Version 1.0.5 publiée le 2026-10-13 : https://github.com/lennoxvdb/guerre-des-gaz/releases/tag/v1.0.5
-- Mises à jour automatiques : `src/engine/update.js` (`@capgo/capacitor-updater`) compare `version.json` local et celui du site, télécharge `update.zip` ; sur l écran titre il installe tout de suite, sinon au prochain lancement. Depuis la 1.0.8 (la 1.0.5 ne les avait pas).
+- Mises à jour automatiques (IMPORTANT : `appReady()` est appelé dès la 1re ligne de `src/main.js` ; s il arrive après le chargement, le téléphone dépasse les 10 s et l outil revient à l ancienne version — c était le bug 1.0.8 → 1.0.9). `src/engine/update.js` (`@capgo/capacitor-updater`) compare `version.json` local et celui du site, télécharge `update.zip` ; sur l écran titre il installe tout de suite, sinon au prochain lancement. Depuis la 1.0.8 (la 1.0.5 ne les avait pas).

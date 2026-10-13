@@ -7,7 +7,10 @@ import { World } from './world/world.js';
 import { FootMode } from './game/foot.js';
 import { FlightMode, FLIGHT_OFF } from './game/flight.js';
 import { MISSIONS, DIFF, footSablon, flightSablon, duelPlateau } from './game/missions.js';
-import { autoUpdate } from './engine/update.js';
+import { autoUpdate, appReady } from './engine/update.js';
+
+// tout de suite : dire à l'outil de mise à jour que cette version démarre bien
+appReady();
 
 const $ = (id) => document.getElementById(id);
 const touchDevice = matchMedia('(pointer: coarse)').matches;
@@ -519,8 +522,7 @@ requestAnimationFrame(frame);
   try { gameVersion = (await fetch('version.json', { cache: 'no-store' }).then((r) => r.json())).version; } catch { /* pas de numéro en aperçu */ }
   title();
   // mises à jour automatiques de l'appli (sur l'écran titre : tout de suite ; en partie : au prochain lancement)
-  autoUpdate((v, now) => toast(now ? `Mise à jour ${v} : le jeu redémarre…` : `Nouvelle version ${v} téléchargée ! Elle sera là au prochain lancement du jeu.`),
-    () => state === 'title' || state === 'menu');
+  autoUpdate(toast, () => state === 'title' || state === 'menu');
   // ?mission=2 ou ?vol pour tester directement
   const q = new URLSearchParams(location.search);
   if (q.has('mission')) startMission(MISSIONS[Number(q.get('mission')) - 1], { retry: true });
