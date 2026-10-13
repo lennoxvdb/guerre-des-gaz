@@ -64,9 +64,12 @@ function part(geo, color, x, y, z, { rx = 0, ry = 0, rz = 0, outline = 0.025, em
 // ---------- équipement ----------
 function lucasHair() {
   const g = new THREE.Group();
-  g.add(part(new THREE.SphereGeometry(0.62, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), 0x7a4a22, 0, 0.42, -0.05, { outline: 0.03 }));
-  for (const [x, z, rx, rz] of [[-0.35, 0.45, 1.2, 0.5], [-0.05, 0.55, 1.4, 0.1], [0.28, 0.5, 1.3, -0.4], [0.45, 0.2, 0.6, -1.0], [-0.5, 0.15, 0.5, 1.0], [0, -0.1, -0.9, 0]]) {
-    g.add(part(new THREE.ConeGeometry(0.16, 0.42, 6), 0x7a4a22, x, 0.62, z, { rx, rz, outline: 0.02 }));
+  // calotte de cheveux assez grande pour couvrir tout le crâne (sinon la peau dépasse sur le dessus)
+  g.add(part(new THREE.SphereGeometry(0.75, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.54), 0x7a4a22, 0, 0.36, -0.02, { rx: -0.32, outline: 0.03 }));
+  // mèches en pointe qui dépassent de la calotte (devant, sur les côtés, derrière)
+  for (const [x, y, z, rx, rz] of [[-0.36, 0.72, 0.5, 1.2, 0.5], [-0.05, 0.8, 0.58, 1.4, 0.1], [0.3, 0.74, 0.52, 1.3, -0.4],
+    [0.62, 0.56, 0.18, 0.6, -1.1], [-0.64, 0.52, 0.12, 0.5, 1.1], [0.1, 0.92, -0.25, -0.7, -0.2], [-0.2, 0.86, -0.4, -1.0, 0.3]]) {
+    g.add(part(new THREE.ConeGeometry(0.17, 0.46, 6), 0x7a4a22, x, y, z, { rx, rz, outline: 0.02 }));
   }
   return g;
 }
