@@ -43,7 +43,7 @@ export class FootMode {
       h.f.giveJetpack();
       h.shadow = shadowBlob(1.4); this.scene.add(h.shadow);
     }
-    this.trail = new SaberTrail(this.scene, 0x8fff5a);
+    this.trail = new SaberTrail(this.scene, h.f.saber.userData.trailColor);
     this.camPos = h.pos.clone();
     // cercle sous l'ennemi qu'on a touché, et petit cercle là où on a touché le sol
     this.marker = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 40).rotateX(-Math.PI / 2),
@@ -628,7 +628,7 @@ export class FootMode {
         if (e.t > D.windup) {
           e.state = 'strike'; e.t = 0;
           f.play('atk3', 1.6, 0.8);
-          sfx.swing(0.7);
+          sfx.swing(0.7, 'classique');
         }
       } else if (e.state === 'strike') {
         if (!e.struck && e.t > 0.18) {
@@ -716,7 +716,7 @@ export class FootMode {
         if (e.t > wind) {
           e.state = 'strike'; e.t = 0;
           f.play(['atk1', 'atk2', 'heavy'][e.combo], 1.6, 0.85);
-          sfx.swing(0.6);
+          sfx.swing(0.6, 'classique');
           e.knock.addScaledVector(toH, 6);
         }
         break;
@@ -768,7 +768,7 @@ export class FootMode {
           s.rotation.z = Math.PI / 2;
           this.scene.add(s);
           e.thrown = { s, vel: toH.clone().multiplyScalar(11), back: false, t: 0 };
-          sfx.swing(0.5);
+          sfx.swing(0.5, 'classique');
         }
         if (e.thrown) {
           const th = e.thrown; th.t += dt;

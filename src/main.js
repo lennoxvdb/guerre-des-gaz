@@ -1,7 +1,7 @@
 // La Guerre des Gaz : démarrage, écrans, commandes, caméra, enchaînement des missions.
 import * as THREE from 'three';
 import { loadTextures, TEX, Particles, puffTex, glowTex, Words } from './engine/gfx.js';
-import { unlock, sfx, playMusic, muted, setMuted } from './engine/audio.js';
+import { unlock, sfx, playMusic, muted, setMuted, setSaberVoice } from './engine/audio.js';
 import { loadKnight, Fighter, SaberTrail } from './entities/fighter.js';
 import { World } from './world/world.js';
 import { FootMode } from './game/foot.js';
@@ -9,6 +9,7 @@ import { FlightMode, FLIGHT_OFF } from './game/flight.js';
 import { MISSIONS, DIFF } from './game/missions.js';
 import { SpeederMode } from './game/speeder.js';
 import { autoUpdate, appReady } from './engine/update.js';
+import { SABRE, loadSabre, saveSabre, makeCustomSaber, setSabreSink } from './entities/sabre.js';
 
 // tout de suite : dire à l'outil de mise à jour que cette version démarre bien
 appReady();
@@ -32,6 +33,9 @@ const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 300);
 const puffs = new Particles(scene, puffTex, 900);
 const glows = new Particles(scene, glowTex, 600); // pas « additif » : les lueurs gardent leur couleur sur le sable
 const words = new Words(scene);
+// les effets du sabre fabriqué (bulles, nuage de prout…) et son bruit
+setSabreSink({ puffs, glows });
+setSaberVoice(loadSabre().son);
 
 // ---------------- aperçu navigateur / téléphone ----------------
 const body = document.body, gameEl = $('game'), device = $('device'), stage = $('stage');
@@ -295,7 +299,7 @@ function title() {
   titleHero = new Fighter('lucas', 2.0);
   titleHero.yaw = Math.PI * 0.25;
   scene.add(titleHero.root);
-  titleTrail = new SaberTrail(scene, 0x8fff5a);
+  titleTrail = new SaberTrail(scene, titleHero.saber.userData.trailColor);
   cam.target.set(0, 1.4, 0); cam.elev = 0; cam.zoom = 0.42; zoomNow = 0.42;
   world.follow(cam.target);
   playMusic('menu');
@@ -303,12 +307,82 @@ function title() {
     <div class="logo">La Guerre<br>des Gaz</div>
     <div></div>
     <div class="row" style="flex-direction:column;align-items:center;gap:12px">
-      <div class="tag">Que le Gaz soit avec toi !</div>
+      <div class="tag">${loadSabre().nom ? '⚔️ ' + esc(loadSabre().nom) : 'Que le Gaz soit avec toi !'}</div>
       <button class="btn big" id="playBtn">▶ JOUER</button>
+      <button class="btn alt" id="sabreBtn">🔧 Fabrique ton sabre</button>
     </div>
     <div class="ver">${gameVersion ? 'Version ' + gameVersion + ' — ' : ''}dessins Gemini, modèle 3D KayKit (CC0)</div>`);
   el.id = 'title';
   $('playBtn').onclick = () => { unlock(); sfx.click(); missionsScreen(); };
+  $('sabreBtn').onclick = () => { unlock(); sfx.click(); atelier(); };
+}
+
+// ---------------- l'atelier : on fabrique son propre sabre-gaz ----------------
+const esc = (t) => String(t || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const wonCount = () => MISSIONS.filter((m) => (save.stars[m.id] || 0) > 0).length;
+// Lucas de l'écran titre prend le nouveau sabre tout de suite
+function refitTitleSaber() {
+  if (!titleHero) return;
+  titleHero.saber.parent.remove(titleHero.saber);
+  titleHero.saber = makeCustomSaber();
+  titleHero.hand.add(titleHero.saber);
+  titleTrail.dispose(scene);
+  titleTrail = new SaberTrail(scene, titleHero.saber.userData.trailColor);
+  setSaberVoice(loadSabre().son);
+}
+let sabreTab = 'couleur';
+function atelier() {
+  state = 'menu';
+  const cfg = loadSabre(), won = wonCount();
+  // on s'approche de Lucas (il reste en haut de l'écran, au-dessus des choix)
+  cam.zoom = 0.3; cam.target.set(0, GW < 560 ? -0.4 : 0.6, 0);
+  const TABS = [['couleur', '🎨 Lame'], ['manche', '🔧 Manche'], ['forme', '⚔️ Forme'], ['effet', '✨ Effet'], ['son', '🔊 Bruit']];
+  const el = screen('', '');
+  el.id = 'atelier';
+  const changed = (showOff) => {
+    saveSabre(cfg); refitTitleSaber();
+    if (showOff) { sfx.ignite(cfg.son); kataT = 0.3; }
+    draw();
+  };
+  const draw = () => {
+    const chips = SABRE[sabreTab].map((it) => {
+      const locked = (it.need || 0) > won;
+      const ico = locked ? '🔒' : sabreTab === 'couleur'
+        ? `<i class="dot ${it.id === 'arc' ? 'arc' : ''}" style="background:#${it.c.toString(16).padStart(6, '0')}"></i>` : it.ico;
+      return `<button class="chip ${cfg[sabreTab] === it.id ? 'sel' : ''} ${locked ? 'lock' : ''}" data-id="${it.id}">
+        <span class="ico">${ico}</span><span>${it.nom}</span>${locked ? `<small>${it.need} mission${it.need > 1 ? 's' : ''}</small>` : ''}</button>`;
+    }).join('');
+    el.innerHTML = `<h2>Ton sabre-gaz</h2>
+      <div class="panel">
+        <input id="sabreNom" maxlength="22" placeholder="✏️ Donne un nom à ton sabre" value="${esc(cfg.nom)}">
+        <div class="tabs">${TABS.map(([k, n]) => `<button class="tab ${k === sabreTab ? 'sel' : ''}" data-k="${k}">${n}</button>`).join('')}</div>
+        <div class="chips">${chips}</div>
+        <div class="row"><button class="btn grey" id="randBtn">🎲 Au hasard</button><button class="btn" id="okBtn">✔ C'est mon sabre !</button></div>
+      </div>`;
+    el.querySelectorAll('.tab').forEach((b) => { b.onclick = () => { sfx.click(); sabreTab = b.dataset.k; draw(); }; });
+    el.querySelectorAll('.chip').forEach((b) => {
+      b.onclick = () => {
+        const it = SABRE[sabreTab].find((x) => x.id === b.dataset.id);
+        if ((it.need || 0) > won) {
+          const left = it.need - won;
+          sfx.click(); toast(`🔒 Gagne encore ${left} mission${left > 1 ? 's' : ''} pour débloquer « ${it.nom} » !`, 3);
+          return;
+        }
+        cfg[sabreTab] = it.id;
+        changed(true);
+      };
+    });
+    $('sabreNom').oninput = (e) => { cfg.nom = e.target.value; saveSabre(cfg); };
+    $('randBtn').onclick = () => {
+      for (const k of Object.keys(SABRE)) {
+        const ok = SABRE[k].filter((x) => (x.need || 0) <= won);
+        cfg[k] = ok[Math.floor(Math.random() * ok.length)].id;
+      }
+      changed(true);
+    };
+    $('okBtn').onclick = () => { sfx.click(); saveSabre(cfg); title(); };
+  };
+  draw();
 }
 
 function missionsScreen() {

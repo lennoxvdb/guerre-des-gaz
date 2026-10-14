@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../../lib/GLTFLoader.js';
 import { clone as skeletonClone } from '../../lib/SkeletonUtils.js';
 import { gradMap, outlineGeo, outlineMat, toonMat } from '../engine/gfx.js';
+import { makeCustomSaber } from './sabre.js';
 
 let gltf = null, clips = null;
 export async function loadKnight() {
@@ -153,7 +154,7 @@ export class SaberTrail {
     geo.setAttribute('alpha', new THREE.BufferAttribute(alpha, 1).setUsage(THREE.DynamicDrawUsage));
     geo.setIndex(idx);
     this.geo = geo;
-    const c = new THREE.Color(color);
+    const c = color && color.isColor ? color : new THREE.Color(color); // une couleur partagée peut changer (arc-en-ciel)
     this.mesh = new THREE.Mesh(geo, new THREE.ShaderMaterial({
       uniforms: { uCol: { value: c } },
       vertexShader: 'attribute float alpha; varying float vA; void main(){ vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
@@ -210,7 +211,7 @@ export class Fighter {
     const hand = model.getObjectByName('handslotr');
     if (kind === 'lucas') {
       const hair = lucasHair(); hair.position.set(0, 0.12, -0.05); head.add(hair);
-      this.saber = makeSaber(0x8fff5a, 0xeaffd8);
+      this.saber = makeCustomSaber(); // le sabre fabriqué dans l'atelier
       hand.add(this.saber);
     } else if (kind === 'soldat') {
       const h = soldierHelmet(); h.position.set(0, 0.12, 0); h.scale.setScalar(0.86); head.add(h);
@@ -266,6 +267,7 @@ export class Fighter {
       this.act[n].setEffectiveWeight(this.w[n]);
     }
     this.mixer.update(dt);
+    if (this.saber && this.saber.userData.anim) this.saber.userData.anim(dt);
     this.root.rotation.y = this.yaw;
     this.flash = Math.max(0, this.flash - dt * 5);
     this.mat.userData.uFlash.value = this.flash;
@@ -304,5 +306,10 @@ export class Fighter {
     g.add(part(new THREE.SphereGeometry(0.26, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0xd8343a, 0, 1.05, 0, { rx: Math.PI, outline: 0.025 }));
     this.hand.add(g);
   }
-  setSaberOn(k) { if (this.saber) this.saber.userData.blade.scale.y = Math.max(0.001, k); }
+  setSaberOn(k) {
+    if (!this.saber) return;
+    const U = this.saber.userData;
+    for (const b of U.blades || [U.blade]) b.scale.y = Math.max(0.001, k);
+    if (U.setOn) U.setOn(k);
+  }
 }

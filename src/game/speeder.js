@@ -56,7 +56,7 @@ export class SpeederMode {
     this.bike.add(this.lucas.root);
     this.shadow = shadowBlob(2.4);
     this.scene.add(this.bike, this.shadow);
-    this.trail = new SaberTrail(this.scene, 0x8fff5a);
+    this.trail = new SaberTrail(this.scene, this.lucas.saber.userData.trailColor);
     this.rowAt = 0;
     this.script = opts.script ? new Script(opts.script(this)) : null;
     ctx.hud.hearts(p.hp, p.maxHp); ctx.hud.mega(p.mega);

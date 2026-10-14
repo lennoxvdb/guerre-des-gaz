@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voir un modèle 3D</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #2b2233; color: #fff; font: 16px sans-serif; overflow: hidden; }
+  #info { position: fixed; left: 12px; top: 10px; }
+</style>
+<script type="importmap">{ "imports": { "three": "../lib/three.module.min.js" } }</script>
+</head>
+<body>
+<div id="info">Glisser = tourner · molette = zoom</div>
+<script type="module">
+// Petit outil : affiche un fichier .glb qui tourne (?f=chemin du fichier, depuis la racine du projet)
+import * as THREE from 'three';
+import { GLTFLoader } from '../lib/GLTFLoader.js';
+const file = new URLSearchParams(location.search).get('f') || 'planches/lucas3d/lucas_trellis.glb';
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2b2233);
+const cam = new THREE.PerspectiveCamera(30, 1, 0.01, 100);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x554466, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(2, 3, 4); scene.add(sun);
+const holder = new THREE.Group(); scene.add(holder);
+let yaw = 0, dist = 2.6, drag = null;
+new GLTFLoader().load('../' + file, (g) => {
+  const box = new THREE.Box3().setFromObject(g.scene), c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+  g.scene.position.sub(c);
+  holder.add(g.scene);
+  dist = Math.max(s.x, s.y, s.z) * 2.4;
+  let tris = 0; g.scene.traverse((o) => { if (o.isMesh) tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; });
+  document.getElementById('info').textContent += ` · ${file} · ${Math.round(tris)} triangles`;
+  window.modelReady = true;
+});
+addEventListener('pointerdown', (e) => { drag = e.clientX; });
+addEventListener('pointermove', (e) => { if (drag !== null) { yaw += (e.clientX - drag) * 0.01; drag = e.clientX; } });
+addEventListener('pointerup', () => { drag = null; });
+addEventListener('wheel', (e) => { dist *= e.deltaY > 0 ? 1.1 : 0.9; });
+window.setYaw = (a) => { yaw = a; };
+function frame() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix();
+  if (drag === null && !window.noSpin) yaw += 0.008;
+  holder.rotation.y = yaw;
+  cam.position.set(0, dist * 0.12, dist); cam.lookAt(0, 0, 0);
+  renderer.render(scene, cam);
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>

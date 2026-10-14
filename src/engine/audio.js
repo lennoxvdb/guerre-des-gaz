@@ -69,16 +69,28 @@ const ok = (n, gap) => {
   last[n] = t; return true;
 };
 
+// le bruit du sabre de Lucas, choisi dans l'atelier : classique, prout, rot, pouet, bulle
+let saberVoice = 'classique';
+export function setSaberVoice(v) { saberVoice = v || 'classique'; }
+
 export const sfx = {
-  swing(k = 1) { // « vvwoomm » du sabre
+  swing(k = 1, voice = saberVoice) { // « vvwoomm » du sabre
     if (!ok('swing', 0.06)) return;
     const t = now();
+    if (voice === 'prout') { fart(t, 0.32, 150 * k, 80 * k, 0.24, 26); noise(t, 0.25, 300, 2, 0.08, 'bandpass', sfxBus, 900); return; }
+    if (voice === 'rot') { fart(t, 0.34, 110 * k, 70 * k, 0.26, 12); return; }
+    if (voice === 'pouet') { tone(t, 0.22, 520 * k, 390 * k, 0.1, 'square', sfxBus, 0.01, 2600); tone(t, 0.22, 780 * k, 585 * k, 0.05, 'square', sfxBus, 0.01, 2600); return; }
+    if (voice === 'bulle') { tone(t, 0.16, 260 * k, 1100 * k, 0.16, 'sine'); tone(t + 0.07, 0.12, 420 * k, 1500 * k, 0.1, 'sine'); return; }
     noise(t, 0.28, 400 * k, 2, 0.22, 'bandpass', sfxBus, 2200 * k);
     tone(t, 0.28, 140 * k, 220 * k, 0.12, 'sawtooth', sfxBus, 0.02, 900);
   },
-  ignite() {
+  ignite(voice = saberVoice) {
     if (!ok('ignite', 0.3)) return;
     const t = now();
+    if (voice === 'prout') { fart(t, 0.7, 90, 220, 0.3, 24); return; }
+    if (voice === 'rot') { fart(t, 0.7, 70, 140, 0.32, 10); return; }
+    if (voice === 'pouet') { tone(t, 0.18, 392, 392, 0.1, 'square', sfxBus, 0.01, 2600); tone(t + 0.18, 0.35, 523, 523, 0.1, 'square', sfxBus, 0.01, 2600); return; }
+    if (voice === 'bulle') { for (let i = 0; i < 4; i++) tone(t + i * 0.08, 0.1, 300 + i * 150, 1200 + i * 200, 0.12, 'sine'); return; }
     tone(t, 0.5, 70, 240, 0.18, 'sawtooth', sfxBus, 0.02, 1200);
     noise(t, 0.4, 300, 2, 0.1, 'bandpass', sfxBus, 3000);
   },
