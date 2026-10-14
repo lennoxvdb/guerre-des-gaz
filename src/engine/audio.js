@@ -22,6 +22,7 @@ export function setMuted(m) {
   muted = m;
   try { localStorage.setItem('gdg_muet', m ? '1' : '0'); } catch { /* rien */ }
   if (master) master.gain.value = m ? 0 : 0.8;
+  musicMuted(m);
 }
 
 const now = () => ac.currentTime;
@@ -214,50 +215,45 @@ export const sfx = {
   click() { if (ok('click', 0.05)) tone(now(), 0.05, 900, 1200, 0.06, 'triangle'); },
 };
 
-// ---------- musique : petites boucles originales ----------
-const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
-// accords : [basse, notes de l'arpège]
-const C = [48, [60, 64, 67, 72]], Am = [45, [57, 60, 64, 69]], F = [41, [53, 57, 60, 65]], G = [43, [55, 59, 62, 67]];
-const Dm = [38, [50, 53, 57, 62]], E = [40, [52, 56, 59, 64]], Bb = [46, [58, 62, 65, 70]], Em = [40, [52, 55, 59, 64]];
-const SONGS = {
-  menu: { bpm: 96, chords: [C, Am, F, G], arp: [0, 2, 1, 2, 0, 2, 1, 3], drums: 'soft' },
-  foot: { bpm: 128, chords: [Am, F, C, G], arp: [0, 1, 2, 1, 3, 2, 1, 2], drums: 'rock' },
-  flight: { bpm: 140, chords: [C, G, Am, F], arp: [0, 2, 3, 2, 1, 2, 3, 1], drums: 'fast' },
-  boss: { bpm: 146, chords: [Am, F, Dm, E], arp: [0, 3, 1, 3, 2, 3, 1, 3], drums: 'fast' },
-  duel: { bpm: 120, chords: [Dm, Bb, F, E], arp: [0, 1, 2, 3, 2, 1, 2, 1], drums: 'duel' },
-  win: { bpm: 112, chords: [C, F, G, C], arp: [0, 1, 2, 3, 3, 2, 1, 0], drums: 'soft' },
-};
-let song = null, pendingSong = null;
+// ---------- musique : de vrais morceaux d'orchestre (libres de droits CC0, voir assets/musique/LICENCE.txt) ----------
+const SONGS = { menu: 1, foot: 1, flight: 1, boss: 1, duel: 1, speeder: 1, win: 0 }; // 1 = en boucle
+const MUSIC_VOL = 0.55;
+let song = null, pendingSong = null, player = null;
+const fades = new Set();
+function fadeTo(a, vol, sec, then) {
+  const v0 = a.volume, t0 = performance.now();
+  const step = () => {
+    const k = Math.min(1, (performance.now() - t0) / (sec * 1000));
+    a.volume = Math.max(0, Math.min(1, v0 + (vol - v0) * k));
+    if (k < 1) requestAnimationFrame(step); else { fades.delete(a); if (then) then(); }
+  };
+  fades.add(a); step();
+}
 export function playMusic(name) {
   pendingSong = name;
-  if (!ac) return;
-  if (song && song.name === name) return;
-  song = name ? { name, def: SONGS[name], step: 0, next: now() + 0.08 } : null;
+  if (!ac) return; // le son ne démarre qu'après un premier toucher (règle des navigateurs)
+  if (song === name) return;
+  song = name;
+  const old = player;
+  if (old) fadeTo(old, 0, 0.8, () => { old.pause(); old.src = ''; });
+  player = null;
+  if (!name || !(name in SONGS)) return;
+  const a = new Audio(`assets/musique/${name}.mp3`);
+  a.loop = !!SONGS[name];
+  a.volume = 0;
+  a.play().catch(() => { /* pas grave : pas de musique */ });
+  if (!muted) fadeTo(a, MUSIC_VOL, 1.2);
+  player = a;
 }
-function kick(t) { tone(t, 0.14, 150, 45, 0.5, 'sine', musicBus); }
-function snare(t) { noise(t, 0.12, 1800, 0.8, 0.22, 'bandpass', musicBus); tone(t, 0.06, 200, 160, 0.1, 'triangle', musicBus); }
-function hat(t, v = 0.05) { noise(t, 0.035, 8000, 0.7, v, 'highpass', musicBus); }
-function playStep(s, t) {
-  const d = s.def, step = s.step % 16, bar = Math.floor(s.step / 16) % d.chords.length;
-  const [bass, notes] = d.chords[bar];
-  const sd = 60 / d.bpm / 4;
-  // basse qui rebondit
-  if (step % 2 === 0) tone(t, sd * 1.6, mtof(bass + (step % 4 === 2 ? 12 : 0)), mtof(bass + (step % 4 === 2 ? 12 : 0)), 0.14, 'square', musicBus, 0.005, 700);
-  // arpège
-  const n = notes[d.arp[step % 8]];
-  if (d.drums !== 'duel' || step % 2 === 0) tone(t, sd * 0.9, mtof(n + 12), mtof(n + 12), 0.045, 'square', musicBus, 0.004, 2600);
-  // batterie
-  const dr = d.drums;
-  if (dr === 'soft') { if (step === 0 || step === 8) kick(t); if (step % 4 === 2) hat(t, 0.03); }
-  if (dr === 'rock') { if (step === 0 || step === 6 || step === 8) kick(t); if (step === 4 || step === 12) snare(t); if (step % 2 === 0) hat(t); }
-  if (dr === 'fast') { if (step % 4 === 0) kick(t); if (step === 4 || step === 12) snare(t); hat(t, step % 2 ? 0.03 : 0.05); }
-  if (dr === 'duel') { if (step === 0 || step === 10) kick(t); if (step === 4 || step === 12) snare(t); if (step % 4 === 2) hat(t); }
+// couper / remettre le son coupe aussi la musique
+export function musicMuted(m) {
+  if (!player) return;
+  if (m) player.volume = 0; else fadeTo(player, MUSIC_VOL, 0.5);
 }
-setInterval(() => {
-  if (!ac || !song) return;
-  while (song.next < now() + 0.15) {
-    playStep(song, song.next);
-    song.next += 60 / song.def.bpm / 4;
-    song.step++;
-  }
-}, 30);
+
+// appli mise en arrière-plan (ou onglet caché) : la musique se tait
+document.addEventListener('visibilitychange', () => {
+  if (!player) return;
+  if (document.hidden) player.pause();
+  else if (!muted) player.play().catch(() => { /* rien */ });
+});

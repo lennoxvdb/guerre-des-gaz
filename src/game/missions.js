@@ -141,7 +141,7 @@ export const MISSIONS = [
   {
     id: 3, name: 'La course des motojets', desc: 'Poursuite en motojet dans la forêt : évite les arbres et sauve R2-WC !',
     theme: 'marais', icon: 'assets/persos/r2wc.webp', parts: ['speeder'],
-    speeder: { script: speederRace, music: 'flight' },
+    speeder: { script: speederRace, music: 'speeder' },
     intro: [
       N('La forêt des marais. Les soldats de Dark Roteur filent en motojet avec R2-WC…'),
       S('lucas', 'Accroche-toi, R2 ! J\'arrive !'),
