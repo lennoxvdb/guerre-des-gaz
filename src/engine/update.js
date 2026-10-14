@@ -43,7 +43,8 @@ export async function autoUpdate(say, canApplyNow) {
     if (!newer(latest.version, mine.version)) return;
     step = 'téléchargement';
     say(`Nouvelle version ${latest.version} : téléchargement…`, 30);
-    const bundle = await U.download({ url: SITE + 'update.zip', version: latest.version });
+    // l'outil refuse de télécharger sans l'empreinte du fichier (« checksum », rangée dans version.json en ligne)
+    const bundle = await U.download({ url: SITE + 'update.zip', version: latest.version, checksum: latest.checksum || '' });
     step = 'installation';
     if (canApplyNow && canApplyNow()) {
       say(`Mise à jour ${latest.version} : le jeu redémarre…`, 10);

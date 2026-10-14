@@ -44,6 +44,9 @@ jobs:
           mkdir site
           cp -r www/. site/
           (cd www && zip -qr ../site/update.zip .)
+          # l'outil de mise à jour exige l'empreinte (SHA-256) du fichier update.zip
+          SUM=$(sha256sum site/update.zip | cut -d' ' -f1)
+          echo "{\"version\":\"$VERSION_NAME\",\"checksum\":\"$SUM\"}" > site/version.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
