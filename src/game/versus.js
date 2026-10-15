@@ -93,7 +93,12 @@ export class VersusMode {
     f.setSaberOn(1); f.setBase('guard');
     this.scene.add(f.root);
     const trail = new SaberTrail(this.scene, kind === 'lucas' ? f.saber.userData.trailColor : 0xb04cff);
-    return { kind, f, trail, x, y: 0, vx: 0, vy: 0, face, hp, maxHp: hp, state: 'idle', move: null, mt: 0, combo: 0, comboT: 0, stun: 0, blocking: false, gauge: 0, startX: x, inv: 0 };
+    // la bulle-bouclier qu'on voit quand il pare
+    const shield = new THREE.Mesh(new THREE.SphereGeometry(kind === 'lucas' ? 1.35 : 1.7, 24, 16),
+      new THREE.MeshBasicMaterial({ color: kind === 'lucas' ? 0x6fd3ff : 0xc38bff, transparent: true, opacity: 0, depthWrite: false }));
+    shield.renderOrder = 4;
+    this.root.add(shield);
+    return { kind, f, trail, shield, shieldGlow: 0, x, y: 0, vx: 0, vy: 0, face, hp, maxHp: hp, state: 'idle', move: null, mt: 0, combo: 0, comboT: 0, stun: 0, blocking: false, gauge: 0, startX: x, inv: 0 };
   }
 
   // ---------- l'affichage : barres de vie, chrono, boutons ----------
@@ -220,7 +225,10 @@ export class VersusMode {
     if (P.state === 'ko' || this.phase !== 'fight' || P.inv > 0) return false;
     const facing = P.face === (fromShot ? -Math.sign(fromShot) : -A.face);
     const pos = _a.set(P.x, P.y + 1.4, 0.3);
-    if (P.blocking && facing && P.y < 0.2) {
+    // on pare si on tient « parer » (même juste après un coup reçu), sauf au milieu de son propre coup de sabre
+    const guarding = P.y < 0.2 && (P.blocking || (P.wantBlock && !(P.state === 'attack' && P.move && !P.move.done)));
+    if (guarding && facing) {
+      P.state = 'idle'; P.move = null; P.blocking = true; P.shieldGlow = 1;
       P.hp -= Math.round(dmg * 0.1); P.vx = -P.face * kb * 0.5; P.stun = 0.15;
       P.f.play('blockHit', 1.4, 0.8);
       sfx.clash(); this.ctx.words.pop('CLANG !', pos, '#ffd23f', 1.1);
@@ -246,13 +254,14 @@ export class VersusMode {
   // ---------- un combattant à chaque image ----------
   step(P, dt, ctl) {
     const O = P.other;
+    P.wantBlock = ctl.block;
     P.inv -= dt; P.comboT -= dt;
     const onGround = P.y <= 0.001;
     if (P.state === 'ko' || P.state === 'win') {
       P.vx *= Math.exp(-dt * 5);
     } else if (P.state === 'hit') {
       P.stun -= dt; P.vx *= Math.exp(-dt * 6);
-      if (P.stun <= 0 && onGround) P.state = 'idle';
+      if ((P.stun <= 0 || (ctl.block && P.stun < 0.25)) && onGround) P.state = 'idle'; // « parer » fait se reprendre plus vite
     } else if (P.state === 'attack') {
       P.mt -= dt;
       if (P.move && P.move.reach && !P.move.done && P.mt <= P.move.len * (1 - P.move.hit)) {
@@ -261,7 +270,7 @@ export class VersusMode {
         if (dx > -0.4 && dx < P.move.reach && Math.abs(O.y - P.y) < 1.8) this.hitBy(O, P, P.move.dmg, P.move.kb);
       }
       if (onGround) P.vx *= Math.exp(-dt * 7);
-      if (P.mt <= 0) { P.state = 'idle'; P.move = null; }
+      if (P.mt <= 0 || (ctl.block && P.move && P.move.done && onGround)) { P.state = 'idle'; P.move = null; } // « parer » arrête la fin du coup
       // on peut enchaîner : un nouveau coup pendant la fin du coup = combo
       if (ctl.attack && P.move && P.move.done && P.mt < P.move.len * 0.35 && ['atk1', 'atk2'].includes(P.move.name)) {
         P.combo = P.move.name === 'atk1' ? 1 : 2;
@@ -307,6 +316,12 @@ export class VersusMode {
     P.f.yaw += (yaw - P.f.yaw) * Math.min(1, dt * 14);
     P.f.update(dt);
     P.f.saberEnds(_a, _b); P.trail.push(_a, _b, P.state === 'attack');
+    P.shieldGlow = Math.max(0, P.shieldGlow - dt * 3);
+    const want = P.blocking ? 0.22 + P.shieldGlow * 0.5 : P.shieldGlow * 0.5;
+    P.shield.material.opacity += (want - P.shield.material.opacity) * Math.min(1, dt * 14);
+    P.shield.visible = P.shield.material.opacity > 0.01;
+    P.shield.position.set(P.x, P.y + (P.kind === 'lucas' ? 1.15 : 1.4), 0);
+    P.shield.scale.setScalar(1 + P.shieldGlow * 0.15);
   }
 
   // ---------- l'ordinateur joue Dark Roteur ----------
