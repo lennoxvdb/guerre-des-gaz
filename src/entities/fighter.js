@@ -354,7 +354,9 @@ export class Fighter {
       if (KC && LC) corr.setFromUnitVectors(dir(L, LC), dir(K, KC));
       // pendant l'animation : Lucas = (mouvement du Knight depuis son repos) appliqué à Lucas « remis en T »
       const qLA = corr.multiply(qL0);
-      pairs.push({ K, L, qK0inv: qK0.invert(), qLA });
+      // les pieds : on les gardera à plat (les pieds du Knight sont minuscules et tournés autrement)
+      const flat = ln === 'LeftFoot' || ln === 'RightFoot' ? { qL0: qL0.clone(), knee: K.parent } : null;
+      pairs.push({ K, L, qK0inv: qK0.invert(), qLA, flat });
     }
     const map = new Map(pairs.map((p) => [p.L, p]));
     const order = [];
@@ -376,6 +378,19 @@ export class Fighter {
     this.grip = new THREE.Matrix4().copy(hand.matrixWorld).invert().multiply(world);
   }
 
+  // pied bien à plat quand la jambe est debout : on ne garde que sa rotation à gauche/droite (un peu)
+  flatFoot(P, want) {
+    const shin = P.K.getWorldPosition(_p).sub(P.flat.knee.getWorldPosition(_p2)).normalize().applyQuaternion(_rootQi);
+    const w = THREE.MathUtils.smoothstep(-shin.y, 0.7, 0.92); // 1 = jambe bien verticale
+    if (w <= 0) return want;
+    const d = want.clone().multiply(P.qLA.clone().invert()); // rotation depuis le repos
+    const twist = new THREE.Quaternion(0, d.y, 0, d.w).normalize(); // seulement autour de la verticale
+    const ang = 2 * Math.atan2(twist.y, twist.w), lim = 0.35;
+    if (Math.abs(ang) > lim) twist.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.sign(ang) * lim);
+    const flat = twist.multiply(P.flat.qL0);
+    return want.slerp(flat, w);
+  }
+
   // à chaque image : les os de Lucas prennent la pose du Knight caché
   followKnight() {
     const L = this.L;
@@ -387,7 +402,8 @@ export class Fighter {
       const P = L.map.get(b);
       if (P) {
         const qK = P.K.getWorldQuaternion(new THREE.Quaternion()).premultiply(_rootQi);
-        const want = qK.multiply(P.qK0inv).multiply(P.qLA);
+        let want = qK.multiply(P.qK0inv).multiply(P.qLA);
+        if (P.flat) want = this.flatFoot(P, want);
         b.quaternion.copy(parentQ.clone().invert().multiply(want));
         world.set(b, want);
       } else {
