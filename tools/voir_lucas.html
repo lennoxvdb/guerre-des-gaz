@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<base href="../">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lucas 3D en mouvement</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #e9d2a6; font: 16px sans-serif; overflow: hidden; }
+  #bar { position: fixed; left: 8px; top: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  button { font: inherit; padding: 6px 10px; border-radius: 10px; border: 2px solid #3a2312; background: #fff7e0; }
+  button.on { background: #9be36b; }
+</style>
+<script type="importmap">{ "imports": { "three": "./lib/three.module.min.js" } }</script>
+</head>
+<body>
+<div id="bar"></div>
+<script type="module">
+// Petit outil : notre Lucas 3D, de près, qui joue chaque animation du jeu (pour vérifier les mouvements)
+import * as THREE from 'three';
+import { loadKnight, Fighter } from './src/entities/fighter.js';
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xe9d2a6);
+scene.add(new THREE.HemisphereLight(0xfff4e0, 0x8a6a4a, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.position.set(4, 8, 6); sun.castShadow = true; scene.add(sun);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(4, 40).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0xd9b77e }));
+ground.receiveShadow = true; scene.add(ground);
+const cam = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+await loadKnight();
+const f = new Fighter('lucas', 2.0);
+f.setSaberOn(1);
+scene.add(f.root);
+window.f = f;
+const ANIMS = ['idle', 'run', 'walk', 'guard', 'block', 'atk1', 'atk2', 'atk3', 'stab', 'spin', 'heavy', 'hit', 'death', 'cheer', 'jumpAir', 'jumpLand', 'sit', 'throw', 'dodge'];
+const LOOP = new Set(['idle', 'run', 'walk', 'guard', 'block', 'sit', 'jumpAir']);
+let cur = 'idle', t = 0;
+const bar = document.getElementById('bar');
+const yawBtn = document.createElement('button'); yawBtn.textContent = '↻ tourner'; bar.appendChild(yawBtn);
+let yaw = 0.5; yawBtn.onclick = () => { yaw += Math.PI / 2; };
+for (const n of ANIMS) {
+  const b = document.createElement('button'); b.textContent = n; b.dataset.n = n;
+  b.onclick = () => window.pose(n);
+  bar.appendChild(b);
+}
+window.pose = (n) => {
+  cur = n;
+  document.querySelectorAll('#bar button').forEach((x) => x.classList.toggle('on', x.dataset.n === n));
+  if (LOOP.has(n)) { f.stopAction(); f.setBase(n); } else { f.setBase('idle'); f.play(n); }
+};
+window.setYaw = (a) => { yaw = a; };
+window.step = (s) => { for (let i = 0; i < s * 60; i++) f.update(1 / 60); };
+window.pose('idle');
+const clock = new THREE.Clock();
+function frame() {
+  const dt = Math.min(0.05, clock.getDelta());
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix();
+  if (!window.frozen) { f.update(dt); if (!LOOP.has(cur) && !f.action) window.pose(cur); }
+  f.yaw = yaw;
+  cam.position.set(0, 1.6, 6.2); cam.lookAt(0, 1.0, 0);
+  renderer.render(scene, cam);
+  requestAnimationFrame(frame);
+}
+frame();
+window.ready = true;
+</script>
+</body>
+</html>

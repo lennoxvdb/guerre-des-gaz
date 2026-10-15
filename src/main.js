@@ -312,7 +312,7 @@ function title() {
       <button class="btn big" id="playBtn">▶ JOUER</button>
       <button class="btn alt" id="sabreBtn">🔧 Fabrique ton sabre</button>
     </div>
-    <div class="ver">${gameVersion ? 'Version ' + gameVersion + ' — ' : ''}dessins Gemini, modèle 3D KayKit (CC0)</div>`);
+    <div class="ver">${gameVersion ? 'Version ' + gameVersion + ' — ' : ''}dessins Gemini, Lucas 3D maison (TRELLIS + Mixamo), soldats KayKit (CC0)</div>`);
   el.id = 'title';
   $('playBtn').onclick = () => { unlock(); sfx.click(); missionsScreen(); };
   $('sabreBtn').onclick = () => { unlock(); sfx.click(); atelier(); };
@@ -324,9 +324,7 @@ const wonCount = () => MISSIONS.filter((m) => (save.stars[m.id] || 0) > 0).lengt
 // Lucas de l'écran titre prend le nouveau sabre tout de suite
 function refitTitleSaber() {
   if (!titleHero) return;
-  titleHero.saber.parent.remove(titleHero.saber);
-  titleHero.saber = makeCustomSaber();
-  titleHero.hand.add(titleHero.saber);
+  titleHero.replaceSaber(makeCustomSaber());
   titleTrail.dispose(scene);
   titleTrail = new SaberTrail(scene, titleHero.saber.userData.trailColor);
   setSaberVoice(loadSabre().son);

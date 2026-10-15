@@ -1,7 +1,10 @@
 // Les combattants en 3D animée : Lucas (sabre-gaz vert), les soldats de Dark Roteur, Dark Roteur.
-// Un seul modèle (« Knight » du KayKit Adventurers Pack, CC0) repeint et équipé dans le code.
+// Les soldats et Dark Roteur : le modèle « Knight » (KayKit Adventurers Pack, CC0) repeint et équipé dans le code.
+// Lucas : NOTRE propre Lucas 3D (dessin Gemini → TRELLIS → squelette Mixamo, assets/3d/lucas.fbx).
+// Il copie à chaque image les mouvements du Knight (caché) : toutes les animations du jeu marchent pour lui.
 import * as THREE from 'three';
 import { GLTFLoader } from '../../lib/GLTFLoader.js';
+import { FBXLoader } from '../../lib/FBXLoader.js';
 import { clone as skeletonClone } from '../../lib/SkeletonUtils.js';
 import { gradMap, outlineGeo, outlineMat, toonMat } from '../engine/gfx.js';
 import { makeCustomSaber } from './sabre.js';
@@ -11,6 +14,43 @@ export async function loadKnight() {
   gltf = await new Promise((res, rej) => new GLTFLoader().load('assets/3d/trooper.glb', res, undefined, rej));
   clips = {};
   for (const c of gltf.animations) clips[c.name] = c;
+  // notre Lucas 3D (s'il manque, on garde l'ancien Lucas fait avec le Knight)
+  try {
+    lucasSrc = await new FBXLoader().loadAsync('assets/3d/lucas.fbx');
+    lucasSrc.traverse((o) => {
+      if (!o.isMesh) return;
+      if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals(); // le fichier de Mixamo n'en a pas : sans elles, Lucas serait tout noir
+      if (o.material && o.material.map) lucasTex = o.material.map;
+    });
+    if (lucasTex) lucasTex.colorSpace = THREE.SRGBColorSpace;
+  } catch (e) { console.warn('Lucas 3D introuvable, on garde l\'ancien', e); lucasSrc = null; }
+}
+let lucasSrc = null, lucasTex = null;
+
+// les os du Knight → les os de Mixamo (et l'os « enfant » qui donne la direction de chaque os)
+const BONES = [
+  ['hips', 'Hips', 'spine', 'Spine'], ['spine', 'Spine', 'chest', 'Spine2'], ['chest', 'Spine2', 'head', 'Neck'], ['head', 'Head', null, null],
+  ['upperarml', 'LeftArm', 'lowerarml', 'LeftForeArm'], ['lowerarml', 'LeftForeArm', 'wristl', 'LeftHand'], ['wristl', 'LeftHand', 'handl', 'LeftHandIndex1'],
+  ['upperarmr', 'RightArm', 'lowerarmr', 'RightForeArm'], ['lowerarmr', 'RightForeArm', 'wristr', 'RightHand'], ['wristr', 'RightHand', 'handr', 'RightHandIndex1'],
+  ['upperlegl', 'LeftUpLeg', 'lowerlegl', 'LeftLeg'], ['lowerlegl', 'LeftLeg', 'footl', 'LeftFoot'], ['footl', 'LeftFoot', 'toesl', 'LeftToeBase'],
+  ['upperlegr', 'RightUpLeg', 'lowerlegr', 'RightLeg'], ['lowerlegr', 'RightLeg', 'footr', 'RightFoot'], ['footr', 'RightFoot', 'toesr', 'RightToeBase'],
+];
+const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _rootQi = new THREE.Quaternion(), _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4();
+const _p = new THREE.Vector3(), _p2 = new THREE.Vector3(), _s = new THREE.Vector3();
+const findBone = (o, name) => o.getObjectByName('mixamorig' + name) || o.getObjectByName('mixamorig:' + name);
+
+// matière toon de notre Lucas, avec le flash blanc quand il est touché
+function lucasMaterial() {
+  const m = new THREE.MeshToonMaterial({ map: lucasTex, gradientMap: gradMap });
+  m.userData.uFlash = { value: 0 };
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uFlash = m.userData.uFlash;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uFlash;')
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>\ngl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), uFlash);');
+  };
+  m.customProgramCacheKey = () => 'lucas3d';
+  return m;
 }
 
 // ---------- peinture : chaque couleur du modèle d'origine est remplacée ----------
@@ -209,7 +249,12 @@ export class Fighter {
     });
     const head = model.getObjectByName('head');
     const hand = model.getObjectByName('handslotr');
-    if (kind === 'lucas') {
+    if (kind === 'lucas' && lucasSrc) {
+      this.setupLucas3D(model, height);
+      this.saber = makeCustomSaber(); // le sabre fabriqué dans l'atelier : il suit la main de notre Lucas
+      this.root.add(this.saber);
+      this.saberSlot = hand;
+    } else if (kind === 'lucas') {
       const hair = lucasHair(); hair.position.set(0, 0.12, -0.05); head.add(hair);
       this.saber = makeCustomSaber(); // le sabre fabriqué dans l'atelier
       hand.add(this.saber);
@@ -267,10 +312,86 @@ export class Fighter {
       this.act[n].setEffectiveWeight(this.w[n]);
     }
     this.mixer.update(dt);
-    if (this.saber && this.saber.userData.anim) this.saber.userData.anim(dt);
     this.root.rotation.y = this.yaw;
+    if (this.L) this.followKnight();
+    if (this.saber && this.saber.userData.anim) this.saber.userData.anim(dt);
     this.flash = Math.max(0, this.flash - dt * 5);
     this.mat.userData.uFlash.value = this.flash;
+  }
+
+  // ---------- notre Lucas 3D ----------
+  setupLucas3D(model, height) {
+    // le Knight reste là, invisible : c'est lui qui joue les animations
+    model.traverse((o) => { if (o.isMesh) o.visible = false; });
+    const lucas = skeletonClone(lucasSrc);
+    lucas.animations = [];
+    const box = new THREE.Box3().setFromObject(lucasSrc);
+    const k = height * 1.08 / (box.max.y - box.min.y); // un peu plus grand que l'ancien Lucas : on le voit bien de haut
+    lucas.scale.setScalar(k);
+    this.mat = lucasMaterial();
+    lucas.traverse((o) => { if (o.isMesh) { o.material = this.mat; o.castShadow = true; o.frustumCulled = false; } });
+    this.root.add(lucas);
+    this.root.updateMatrixWorld(true);
+    // au repos : orientation de chaque os (par rapport au personnage), et correction « bras en A » → « bras en T »
+    const dir = (a, b) => b.getWorldPosition(new THREE.Vector3()).sub(a.getWorldPosition(new THREE.Vector3())).normalize();
+    const pairs = [];
+    for (const [kn, ln, kc, lc] of BONES) {
+      const K = model.getObjectByName(kn), L = findBone(lucas, ln);
+      if (!K || !L) continue;
+      const qK0 = K.getWorldQuaternion(new THREE.Quaternion());
+      const qL0 = L.getWorldQuaternion(new THREE.Quaternion());
+      let corr = new THREE.Quaternion();
+      const KC = kc && model.getObjectByName(kc), LC = lc && findBone(lucas, lc);
+      if (KC && LC) corr.setFromUnitVectors(dir(L, LC), dir(K, KC));
+      // pendant l'animation : Lucas = (mouvement du Knight depuis son repos) appliqué à Lucas « remis en T »
+      const qLA = corr.multiply(qL0);
+      pairs.push({ K, L, qK0inv: qK0.invert(), qLA });
+    }
+    const map = new Map(pairs.map((p) => [p.L, p]));
+    const order = [];
+    findBone(lucas, 'Hips').traverse((o) => { if (o.isBone) order.push(o); });
+    const hipsK = model.getObjectByName('hips'), hipsL = findBone(lucas, 'Hips');
+    const hK0 = hipsK.getWorldPosition(new THREE.Vector3()), hL0 = hipsL.getWorldPosition(new THREE.Vector3());
+    this.L = { lucas, order, map, rest: new Map(order.map((b) => [b, b.quaternion.clone()])), hipsK, hipsL, hK0, hL0, ratio: hL0.y / hK0.y, scale: k };
+    this.lucasHand = findBone(lucas, 'RightHand');
+    this.lucasChest = findBone(lucas, 'Spine2');
+    this.knightScale = height / 2.3;
+  }
+
+  // à chaque image : les os de Lucas prennent la pose du Knight caché
+  followKnight() {
+    const L = this.L;
+    this.root.updateMatrixWorld(true);
+    _rootQi.copy(this.root.getWorldQuaternion(_q)).invert();
+    const world = new Map(); // orientation de chaque os de Lucas, par rapport au personnage
+    for (const b of L.order) {
+      const parentQ = world.get(b.parent) || _q2.copy(_rootQi).multiply(b.parent.getWorldQuaternion(new THREE.Quaternion()));
+      const P = L.map.get(b);
+      if (P) {
+        const qK = P.K.getWorldQuaternion(new THREE.Quaternion()).premultiply(_rootQi);
+        const want = qK.multiply(P.qK0inv).multiply(P.qLA);
+        b.quaternion.copy(parentQ.clone().invert().multiply(want));
+        world.set(b, want);
+      } else {
+        b.quaternion.copy(L.rest.get(b));
+        world.set(b, parentQ.clone().multiply(b.quaternion));
+      }
+    }
+    // les hanches montent et descendent comme celles du Knight (sauts, chutes, assis)
+    _m.copy(this.root.matrixWorld).invert();
+    _p.copy(L.hipsK.getWorldPosition(_p)).applyMatrix4(_m).sub(L.hK0).multiplyScalar(L.ratio).add(L.hL0);
+    _m2.copy(_m).multiply(L.hipsL.parent.matrixWorld).invert();
+    L.hipsL.position.copy(_p.applyMatrix4(_m2));
+    L.lucas.updateMatrixWorld(true);
+    // le sabre : dans la main de Lucas, avec la même orientation que dans la main du Knight
+    if (this.saber && this.saberSlot) {
+      const slotQ = this.saberSlot.getWorldQuaternion(_q);
+      const off = this.saberSlot.getWorldPosition(_p).sub(this.saberSlot.parent.getWorldPosition(_p2)); // de la main au manche
+      const handPos = this.lucasHand.getWorldPosition(_p2).add(off.multiplyScalar(0.6));
+      _m.compose(handPos, slotQ, this.saberSlot.getWorldScale(_s));
+      _m2.copy(this.root.matrixWorld).invert().multiply(_m);
+      _m2.decompose(this.saber.position, this.saber.quaternion, this.saber.scale);
+    }
   }
 
   turnTo(yaw, dt, speed = 12) {
@@ -285,7 +406,7 @@ export class Fighter {
   muzzle(out) { return this.gun.userData.muzzle.getWorldPosition(out); }
   // un jetpack à prout dans le dos (deux réservoirs verts, deux tuyères, des flammes)
   giveJetpack() {
-    const chest = this.model.getObjectByName('chest') || this.model.getObjectByName('spine');
+    const chest = this.lucasChest || this.model.getObjectByName('chest') || this.model.getObjectByName('spine');
     const g = new THREE.Group();
     for (const sx of [-1, 1]) {
       g.add(part(new THREE.CapsuleGeometry(0.22, 0.5, 4, 10), 0x4fc23a, sx * 0.27, 0.15, 0, { outline: 0.025 }));
@@ -293,6 +414,10 @@ export class Fighter {
     }
     g.add(part(new THREE.BoxGeometry(0.7, 0.4, 0.18), 0x8d8f99, 0, 0.2, 0.14, { outline: 0.02 }));
     g.position.set(0, 0.25, -0.45);
+    if (this.lucasChest) { // os de Mixamo : unités en centimètres
+      const f = this.knightScale / this.L.scale;
+      g.scale.setScalar(f); g.position.set(0, -0.12, -0.32).multiplyScalar(f);
+    }
     chest.add(g);
     this.jetpack = g;
     return g;
@@ -305,6 +430,12 @@ export class Fighter {
     g.add(part(new THREE.CylinderGeometry(0.05, 0.05, 1.1, 8), 0xb07a45, 0, 0.45, 0, { outline: 0.02 }));
     g.add(part(new THREE.SphereGeometry(0.26, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0xd8343a, 0, 1.05, 0, { rx: Math.PI, outline: 0.025 }));
     this.hand.add(g);
+  }
+  // changer de sabre (l'atelier) : dans la main du Knight, ou qui suit la main de notre Lucas
+  replaceSaber(s) {
+    if (this.saber && this.saber.parent) this.saber.parent.remove(this.saber);
+    this.saber = s;
+    if (this.saberSlot) this.root.add(s); else this.hand.add(s);
   }
   setSaberOn(k) {
     if (!this.saber) return;

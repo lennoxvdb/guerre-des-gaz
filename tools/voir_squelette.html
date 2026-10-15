@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voir le squelette</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #2b2233; color: #fff; font: 16px sans-serif; overflow: hidden; }
+  #info { position: fixed; left: 12px; top: 10px; }
+</style>
+<script type="importmap">{ "imports": { "three": "../lib/three.module.min.js" } }</script>
+</head>
+<body>
+<div id="info">Squelette Mixamo (os en couleur, boules = articulations)</div>
+<script type="module">
+// Petit outil : montre un personnage .fbx de Mixamo à moitié transparent, avec ses os et ses articulations
+import * as THREE from 'three';
+import { FBXLoader } from '../lib/FBXLoader.js';
+const file = new URLSearchParams(location.search).get('f') || 'assets/3d/lucas.fbx';
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2b2233);
+const cam = new THREE.PerspectiveCamera(30, 1, 1, 2000);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x554466, 2.5));
+new FBXLoader().load('../' + file, (fbx) => {
+  fbx.traverse((o) => { if (o.isMesh) { o.material.transparent = true; o.material.opacity = 0.45; o.material.depthWrite = false; } });
+  scene.add(fbx);
+  const helper = new THREE.SkeletonHelper(fbx);
+  helper.material.depthTest = false; helper.material.linewidth = 3;
+  scene.add(helper);
+  fbx.updateMatrixWorld(true);
+  fbx.traverse((o) => {
+    if (!o.isBone) return;
+    const n = o.name.replace('mixamorig', '');
+    const big = /Arm|ForeArm|Hand$|UpLeg|Leg$|Foot$|Head$|Hips/.test(n);
+    if (!big) return;
+    const color = /ForeArm/.test(n) ? 0xff3a3a : /Leg$/.test(n) ? 0xffd23f : 0x8fff5a;
+    const s = new THREE.Mesh(new THREE.SphereGeometry(/ForeArm/.test(n) ? 3.2 : 2, 12, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+    s.renderOrder = 10;
+    o.getWorldPosition(s.position);
+    scene.add(s);
+  });
+  window.modelReady = true;
+});
+function frame() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix();
+  cam.position.set(0, 70, 330); cam.lookAt(0, 65, 0);
+  renderer.render(scene, cam);
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
