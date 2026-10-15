@@ -45,6 +45,13 @@ export class FootMode {
     }
     this.trail = new SaberTrail(this.scene, h.f.saber.userData.trailColor);
     this.camPos = h.pos.clone();
+    // la vue « cinéma » : la caméra derrière Lucas, à hauteur d'enfant, comme sur l'écran d'accueil
+    if (opts.cinema) {
+      this.cam3 = new THREE.PerspectiveCamera(50, ctx.aspect(), 0.1, 400);
+      this.oldFog = this.scene.fog;
+      this.scene.fog = new THREE.Fog(this.world.T.sky, 40, 120);
+      this.cineEye = null;
+    }
     // cercle sous l'ennemi qu'on a touché, et petit cercle là où on a touché le sol
     this.marker = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 40).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0xff4a3a, transparent: true, opacity: 0.85, depthWrite: false }));
@@ -954,11 +961,26 @@ export class FootMode {
     // caméra : suit Lucas en douceur
     this.camPos.lerp(h.pos, Math.min(1, dt * 5));
     this.ctx.cam.target.copy(this.camPos).setY(1);
+    if (this.cam3) this.placeCinema(dt);
     this.world.follow(h.pos);
     return this.result;
   }
 
+  // la caméra de la vue « cinéma » : derrière et un peu au-dessus de Lucas (même direction que la vue du dessus,
+  // donc le joystick marche pareil : vers le haut = s'éloigner de la caméra)
+  placeCinema(dt) {
+    const a = this.ctx.aspect(), cam = this.cam3;
+    const dist = a < 1 ? 9.5 : 7.5, high = (a < 1 ? 5.2 : 4.0) + (this.jet ? this.lift : 0);
+    const back = _b.set(1, 0, 1).normalize();
+    const eye = this.camPos.clone().addScaledVector(back, dist).setY(high);
+    this.cineEye = this.cineEye ? this.cineEye.lerp(eye, Math.min(1, dt * 6)) : eye;
+    cam.position.copy(this.cineEye);
+    cam.lookAt(this.camPos.x - back.x * 2.5, 1.2 + (this.jet ? this.lift : 0), this.camPos.z - back.z * 2.5);
+    cam.fov = a < 1 ? 62 : 50; cam.aspect = a; cam.updateProjectionMatrix();
+  }
+
   dispose() {
+    if (this.cam3) this.scene.fog = this.oldFog || null;
     for (const e of this.enemies) { if (e.g) this.scene.remove(e.g); if (e.f) this.scene.remove(e.f.root); if (e.arc) this.scene.remove(e.arc); if (e.trail) e.trail.dispose(this.scene); if (e.shadow) this.scene.remove(e.shadow); if (e.thrown) this.scene.remove(e.thrown.s); }
     for (const b of this.bolts) this.scene.remove(b.g);
     for (const s of this.strafes) { this.scene.remove(s.ship, s.shadow); for (const im of s.impacts) this.scene.remove(im.w); }

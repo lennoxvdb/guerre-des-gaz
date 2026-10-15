@@ -52,6 +52,7 @@ function resize() {
   if (!GW || !GH) return;
   renderer.setSize(GW, GH, false);
   gameEl.classList.toggle('narrow', GW < 560);
+  gameEl.classList.toggle('wide', GW / GH > 1.45 && GH < 620); // téléphone couché : écran large mais bas
 }
 function applyView() {
   const phone = view.mode === 'phone' && !native;
@@ -167,13 +168,13 @@ function tapAt(x, y) {
   let best = null, bestD = Math.max(70, GW * 0.14);
   for (const en of mode.enemies) {
     if (en.dead || en.state === 'drop') continue;
-    _v.copy(en.pos).setY(en.kind === 'roteur' ? 1.6 : 0.9).project(camera);
+    _v.copy(en.pos).setY(en.kind === 'roteur' ? 1.6 : 0.9).project(viewCam());
     const d = Math.hypot((_v.x + 1) / 2 * GW - x, (1 - _v.y) / 2 * GH - y);
     const r = en.kind === 'roteur' ? bestD * 1.5 : bestD;
     if (d < r && (!best || d < best.d)) best = { en, d };
   }
   if (best) { mode.attackTarget(best.en); return; }
-  _ray.setFromCamera(new THREE.Vector2(x / GW * 2 - 1, -(y / GH) * 2 + 1), camera);
+  _ray.setFromCamera(new THREE.Vector2(x / GW * 2 - 1, -(y / GH) * 2 + 1), viewCam());
   if (!_ray.ray.intersectPlane(_ground, _v)) return;
   // le sol juste à côté d'un soldat : c'est lui qu'on voulait
   for (const en of mode.enemies) {
@@ -271,18 +272,22 @@ const ctx = {
 // ---------------- écrans ----------------
 let state = 'loading', paused = false, mode = null, modeName = null, mission = null, world = null;
 let titleHero = null, titleTrail = null, storyCb = null;
+// la caméra qu'on voit : celle du mode de jeu (tranchée, duel, vue cinéma), celle de l'écran titre, ou la vue du dessus
+const viewCam = () => (mode && mode.cam3) || (titleHero ? titleCam : camera);
 // l'écran titre : une vraie caméra de cinéma, Lucas en grand et vu de face
 const titleCam = new THREE.PerspectiveCamera(36, 1, 0.1, 500);
 let titleShot = 'title'; // 'title' (au milieu, entre le titre et les boutons) ou 'atelier' (en haut, au-dessus des choix)
 const _look = new THREE.Vector3(), _camWant = new THREE.Vector3();
 function placeTitleCam(dt, T) {
   const a = aspect(), atelierShot = titleShot === 'atelier';
+  const wide = gameEl.classList.contains('wide'); // téléphone couché : Lucas à gauche, le titre et les boutons à droite
   // hauteur de monde visible : assez pour que les coups de sabre restent dans l'écran (téléphone en hauteur)
-  const H = atelierShot ? Math.max(4.4, 2.7 / a) : Math.max(4.6, 2.9 / a);
+  const H = wide ? 4.0 : atelierShot ? Math.max(4.4, 2.7 / a) : Math.max(4.6, 2.9 / a);
   const d = H / 2 / Math.tan(THREE.MathUtils.degToRad(titleCam.fov / 2));
-  const lookY = atelierShot ? 1.05 - H * 0.2 : 1.05 + H * (a < 1 ? 0.02 : 0.06);
-  _look.set(0, lookY, 0);
-  _camWant.set(Math.sin(T * 0.25) * 0.6, lookY + 0.25, d);
+  const lookY = wide ? 1.15 : atelierShot ? 1.05 - H * 0.2 : 1.05 + H * (a < 1 ? 0.02 : 0.06);
+  const sx = wide ? H / 2 * a * 0.45 : 0; // décalage : Lucas apparaît vers la gauche
+  _look.set(sx, lookY, 0);
+  _camWant.set(sx + Math.sin(T * 0.25) * 0.6, lookY + 0.25, d);
   titleCam.position.lerp(_camWant, Math.min(1, dt * 3));
   titleCam.lookAt(_look);
   titleCam.aspect = a; titleCam.updateProjectionMatrix();
@@ -414,7 +419,11 @@ function missionsScreen() {
       <img src="${img}" alt=""><b>${m.id}. ${m.name}</b><p>${m.desc}</p>
       <div class="stars">${m.soon ? 'Bientôt' : [1, 2, 3].map((i) => (i <= st ? '⭐' : '☆')).join('')}</div></button>`;
   }).join('');
-  screen(`<h2>Choisis ta mission</h2><div class="cards">${cards}</div><button class="btn grey" id="backBtn">◀ Retour</button>`, 'dim');
+  const cine = save.vue === 'cinema';
+  screen(`<h2>Choisis ta mission</h2>
+    <button class="btn alt vueBtn" id="vueBtn">🎥 Vue : ${cine ? 'derrière Lucas (cinéma)' : 'du dessus'}</button>
+    <div class="cards">${cards}</div><button class="btn grey" id="backBtn">◀ Retour</button>`, 'dim');
+  $('vueBtn').onclick = () => { sfx.click(); save.vue = cine ? 'dessus' : 'cinema'; persist(); missionsScreen(); };
   document.querySelectorAll('.card').forEach((c) => c.addEventListener('click', () => {
     const m = MISSIONS.find((x) => x.id === Number(c.dataset.id));
     if (m.soon) return;
@@ -476,7 +485,7 @@ function startPart(part, carry = {}) {
   const m = mission;
   if (part === 'foot') {
     const F = m.foot;
-    mode = new FootMode(ctx, { script: F.script, heroPos: new THREE.Vector3(...F.start), radius: F.radius, jet: F.jet, indoor: F.indoor });
+    mode = new FootMode(ctx, { script: F.script, heroPos: new THREE.Vector3(...F.start), radius: F.radius, jet: F.jet, indoor: F.indoor, cinema: save.vue === 'cinema' });
     playMusic(F.music || 'foot');
   } else if (part === 'flight') {
     if (world.wc) world.wc.visible = false;
@@ -611,7 +620,7 @@ function frame(now) {
   if (bannerT > 0 && !paused) { bannerT -= real; if (bannerT <= 0) $('banner').classList.add('hidden'); }
   const ptr = $('pointer');
   if (pointerTarget && modeName === 'foot' && mode && mode.hero && Math.hypot(mode.hero.pos.x - pointerTarget.x, mode.hero.pos.z - pointerTarget.z) > 5) {
-    _p.copy(mode.hero.pos).setY(1).project(camera); _q.copy(pointerTarget).project(camera);
+    _p.copy(mode.hero.pos).setY(1).project(viewCam()); _q.copy(pointerTarget).project(viewCam());
     const ang = Math.atan2(-(_q.y - _p.y) * GH, (_q.x - _p.x) * GW);
     const cx = (_p.x + 1) / 2 * GW + Math.cos(ang) * 90, cy = (1 - _p.y) / 2 * GH + Math.sin(ang) * 90;
     ptr.style.left = cx + 'px'; ptr.style.top = cy + 'px'; ptr.style.transform = `rotate(${ang}rad)`;
@@ -619,7 +628,7 @@ function frame(now) {
   } else ptr.classList.add('hidden');
 
   // la tranchée et l'écran titre ont leur caméra de cinéma
-  renderer.render(scene, mode && mode.cam3 ? mode.cam3 : titleHero ? titleCam : camera);
+  renderer.render(scene, viewCam());
   requestAnimationFrame(frame);
 }
 
