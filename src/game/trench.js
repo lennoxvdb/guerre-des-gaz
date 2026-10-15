@@ -348,7 +348,7 @@ export class TrenchMode {
     // la tranchée défile : on ajoute des morceaux devant, on enlève ceux de derrière
     const front = this.segs.length ? this.segs[this.segs.length - 1].z0 - SEG : 0;
     if (front > this.z - 380) this.addSeg(front);
-    this.segs = this.segs.filter((s) => { if (s.z0 - SEG > this.z + 30) { this.root.remove(s.g); return false; } return true; });
+    this.segs = this.segs.filter((s) => { if (s.z0 - SEG > this.z + 130) { this.root.remove(s.g); return false; } return true; });
     // ce que le scénario demande de placer devant
     if (this.mode !== 'calme' && this.mode !== 'fin') {
       while (this.genZ > this.z - 300) {
@@ -461,17 +461,37 @@ export class TrenchMode {
     const p = this.ship;
     // caméra « de face » pendant que Dark Roteur nous poursuit : on le voit derrière Lucas
     const back = this.camBack;
-    const want = back ? new THREE.Vector3(p.x + 4, p.y + 2.2, this.z - 12) : new THREE.Vector3(p.x * 0.55, p.y + 2.3, this.z + 8.5);
+    const want = back ? new THREE.Vector3(p.x + 4, p.y + (this.free ? 7 : 2.2), this.z - 12) : new THREE.Vector3(p.x * 0.55, p.y + 2.3, this.z + 8.5);
     this.camPos.lerp(want, Math.min(1, dt * (back ? 2.5 : 5)));
     this.camPos.z = Math.min(Math.max(this.camPos.z, want.z - 3), want.z + 3); // elle ne se laisse pas distancer
     this.cam3.position.copy(this.camPos);
     if (this.shakeT > 0) { this.shakeT -= dt; this.cam3.position.x += rand(-0.3, 0.3); this.cam3.position.y += rand(-0.3, 0.3); }
-    if (back) this.cam3.lookAt(p.x, p.y + 1.5, this.z + 6);
+    if (back) this.cam3.lookAt(p.x, this.free ? p.y - 4 : p.y + 1.5, this.z + (this.free ? 14 : 6)); // en remontant : on regarde la station en bas
     else { this.cam3.lookAt(p.x * 0.8, p.y + 0.6, this.z - 14); this.cam3.rotation.z += -p.tilt * 0.25; }
     this.cam3.aspect = this.ctx.aspect();
     this.cam3.fov = this.ctx.aspect() < 1 ? 74 : 60;
     this.cam3.updateProjectionMatrix();
     this.stars.position.set(this.camPos.x, 0, this.camPos.z);
+  }
+
+  // la grande surface de la station-toilettes (on la voit en remontant vers les étoiles)
+  buildSurface() {
+    const M = mats(), g = new THREE.Group();
+    const tex = M.top.map.clone(); tex.repeat.set(110, 220); tex.needsUpdate = true;
+    const mat = new THREE.MeshToonMaterial({ map: tex });
+    for (const s of [-1, 1]) { // deux grandes moitiés, en laissant la tranchée ouverte au milieu
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(700, 1400).rotateX(-Math.PI / 2), mat);
+      floor.position.set(s * (W + 350), H - 0.12, this.z + 100);
+      g.add(floor);
+    }
+    // des tours, des dômes et des tuyaux partout sur la station
+    for (let i = 0; i < 60; i++) {
+      const x = (Math.random() < 0.5 ? -1 : 1) * rand(W + 6, 220), z = this.z + rand(-200, 400), h = rand(2, 14), r = rand(2, 7);
+      const kind = Math.random();
+      const geo = kind < 0.4 ? new THREE.CylinderGeometry(r, r * 1.1, h, 14) : kind < 0.7 ? new THREE.BoxGeometry(r * 2, h, r * 2) : new THREE.SphereGeometry(r, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+      g.add(part(geo, pick([0xe9ece6, 0xd8dce4, 0xcfd6e0, 0xb8a6d8]), x, kind < 0.7 ? H + h / 2 : H, z, { outline: 0.1 }));
+    }
+    this.root.add(g);
   }
 
   // ---------- la fin : le trou de la chasse d'eau ----------
@@ -639,9 +659,10 @@ function* trenchRun(m) {
   hud.banner('CHASSE D\'EAU TIRÉE !', 3);
   // on remonte vers les étoiles pendant que la station se vide
   m.free = true; m.autopilot = true; m.camBack = true; // on se retourne pour voir la station se vider
+  m.buildSurface();
   for (let k = 0; k < 1; k += 1 / 90) {
     p.y += 0.35; p.roll = -0.4;
-    if (Math.random() < 0.6) m.ctx.puffs.emit(rand(-W, W), H, m.z + rand(10, 60), 0x6fe04a, { vy: rand(8, 20), life: 1.4, s0: 2, s1: 6 });
+    for (let i = 0; i < 3; i++) m.ctx.puffs.emit(rand(-90, 90), H, m.z + rand(-40, 160), pick([0x6fe04a, 0x9be36b, 0xc8f59a]), { vy: rand(10, 24), life: 1.6, s0: 2.5, s1: 8 });
     yield 1 / 30;
   }
   sfx.win();
