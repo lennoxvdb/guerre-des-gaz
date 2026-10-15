@@ -269,6 +269,22 @@ const ctx = {
 // ---------------- écrans ----------------
 let state = 'loading', paused = false, mode = null, modeName = null, mission = null, world = null;
 let titleHero = null, titleTrail = null, storyCb = null;
+// l'écran titre : une vraie caméra de cinéma, Lucas en grand et vu de face
+const titleCam = new THREE.PerspectiveCamera(36, 1, 0.1, 500);
+let titleShot = 'title'; // 'title' (au milieu, entre le titre et les boutons) ou 'atelier' (en haut, au-dessus des choix)
+const _look = new THREE.Vector3(), _camWant = new THREE.Vector3();
+function placeTitleCam(dt, T) {
+  const a = aspect(), atelierShot = titleShot === 'atelier';
+  // hauteur de monde visible : assez pour que les coups de sabre restent dans l'écran (téléphone en hauteur)
+  const H = atelierShot ? Math.max(4.4, 2.7 / a) : Math.max(4.6, 2.9 / a);
+  const d = H / 2 / Math.tan(THREE.MathUtils.degToRad(titleCam.fov / 2));
+  const lookY = atelierShot ? 1.05 - H * 0.2 : 1.05 + H * (a < 1 ? 0.02 : 0.06);
+  _look.set(0, lookY, 0);
+  _camWant.set(Math.sin(T * 0.25) * 0.6, lookY + 0.25, d);
+  titleCam.position.lerp(_camWant, Math.min(1, dt * 3));
+  titleCam.lookAt(_look);
+  titleCam.aspect = a; titleCam.updateProjectionMatrix();
+}
 function screen(html, cls = '') {
   $('screens').innerHTML = `<div class="screen ${cls}">${html}</div>`;
   return $('screens').firstElementChild;
@@ -298,9 +314,10 @@ function title() {
   $('hud').classList.add('hidden');
   setWorld('sablon');
   titleHero = new Fighter('lucas', 2.0);
-  titleHero.yaw = Math.PI * 0.25;
+  titleHero.yaw = 0; // face à nous
   scene.add(titleHero.root);
   titleTrail = new SaberTrail(scene, titleHero.saber.userData.trailColor);
+  titleShot = 'title'; placeTitleCam(1, 0); // caméra tout de suite à sa place
   cam.target.set(0, 1.4, 0); cam.elev = 0; cam.zoom = 0.42; zoomNow = 0.42;
   world.follow(cam.target);
   playMusic('menu');
@@ -315,6 +332,7 @@ function title() {
     <div class="ver">${gameVersion ? 'Version ' + gameVersion + ' — ' : ''}dessins Gemini, Lucas 3D maison (TRELLIS + Mixamo), soldats KayKit (CC0)</div>`);
   el.id = 'title';
   $('playBtn').onclick = () => { unlock(); sfx.click(); missionsScreen(); };
+  titleShot = 'title';
   $('sabreBtn').onclick = () => { unlock(); sfx.click(); atelier(); };
 }
 
@@ -334,7 +352,7 @@ function atelier() {
   state = 'menu';
   const cfg = loadSabre(), won = wonCount();
   // on s'approche de Lucas (il reste en haut de l'écran, au-dessus des choix)
-  cam.zoom = 0.3; cam.target.set(0, GW < 560 ? -0.4 : 0.6, 0);
+  titleShot = 'atelier';
   const TABS = [['couleur', '🎨 Lame'], ['manche', '🔧 Manche'], ['forme', '⚔️ Forme'], ['effet', '✨ Effet'], ['son', '🔊 Bruit']];
   const el = screen('', '');
   el.id = 'atelier';
@@ -572,7 +590,8 @@ function frame(now) {
     titleHero.update(dt);
     titleHero.setSaberOn(1);
     titleHero.saberEnds(_p, _q); titleTrail.push(_p, _q, !!titleHero.action);
-    titleHero.yaw = Math.PI * 0.25 + Math.sin(T * 0.4) * 0.3;
+    titleHero.yaw = Math.sin(T * 0.4) * 0.35; // il nous fait face en se tournant un peu
+    placeTitleCam(dt, T);
   }
 
   if (world) world.update(dt, T);
@@ -591,7 +610,8 @@ function frame(now) {
     ptr.classList.remove('hidden');
   } else ptr.classList.add('hidden');
 
-  renderer.render(scene, mode && mode.cam3 ? mode.cam3 : camera); // la tranchée a sa caméra de cinéma
+  // la tranchée et l'écran titre ont leur caméra de cinéma
+  renderer.render(scene, mode && mode.cam3 ? mode.cam3 : titleHero ? titleCam : camera);
   requestAnimationFrame(frame);
 }
 
