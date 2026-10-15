@@ -112,11 +112,11 @@ export class TrenchMode {
     // l'espace : fond noir étoilé, brume au loin
     this.oldBg = this.scene.background; this.oldFog = this.scene.fog;
     this.scene.background = new THREE.Color(0x07040f);
-    this.scene.fog = new THREE.Fog(0x1a1030, 60, 190);
+    this.scene.fog = new THREE.Fog(0x120a22, 170, 430); // brume très loin : on voit la tranchée au loin
     if (this.world && this.world.ground) { this.oldGround = this.world.ground.visible; this.world.ground.visible = false; }
     this.stars = this.makeStars(); this.root.add(this.stars);
     // la caméra de cinéma
-    this.cam3 = new THREE.PerspectiveCamera(62, ctx.aspect(), 0.1, 400);
+    this.cam3 = new THREE.PerspectiveCamera(62, ctx.aspect(), 0.1, 800);
     this.camPos = new THREE.Vector3(0, H + 12, 14);
     this.shakeT = 0;
     const p = this.ship = { x: 0, y: H + 8, hp: opts.hp ?? ctx.diff.hp, maxHp: ctx.diff.hp, inv: 0, fireT: 0, mega: opts.mega ?? 0, tilt: 0, roll: 0 };
@@ -197,16 +197,21 @@ export class TrenchMode {
     this.obst.push({ g, z, box, hit: false });
   }
 
-  // tourelle sur le bord de la tranchée : elle tire des bulles violettes
+  // tourelle accrochée au mur de la tranchée (bien en face du joueur) : elle tire des bulles violettes
   addTurret(z, side = pick([-1, 1])) {
     const g = new THREE.Group();
-    g.add(part(new THREE.CylinderGeometry(1.0, 1.2, 0.7, 12), 0x5a3a66, 0, 0, 0));
-    g.add(part(new THREE.SphereGeometry(0.85, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0x8a5ab0, 0, 0.3, 0));
-    const barrel = part(new THREE.CylinderGeometry(0.18, 0.22, 1.6, 10).rotateX(Math.PI / 2), 0x3a2848, 0, 0.8, 0.6);
-    g.add(barrel);
-    g.position.set(side * (W + 1.4), H + 0.35, z);
+    const y = rand(4.5, 8);
+    g.add(part(new THREE.BoxGeometry(0.5, 2.2, 2.2), 0x5a3a66, side * 0.25, 0, 0)); // la plaque fixée au mur
+    const head = new THREE.Group(); // la tête qui tourne vers le vaisseau
+    head.add(part(new THREE.SphereGeometry(0.95, 14, 10), 0x8a5ab0, 0, 0, 0));
+    head.add(part(new THREE.CylinderGeometry(0.2, 0.26, 1.8, 10).rotateX(Math.PI / 2), 0x3a2848, 0, 0, 1.1));
+    const lamp = glowSprite(0xff3a3a, 1.4, 0.95); lamp.position.y = 0.9; head.add(lamp);
+    head.position.x = -side * 0.7;
+    g.add(head);
+    g.scale.setScalar(1.35); // bien grosse, pour qu'on la voie arriver
+    g.position.set(side * W, y, z);
     this.root.add(g);
-    this.turrets.push({ g, barrel, z, x: side * (W + 1.4), y: H + 0.8, hp: 3, fireT: rand(0.6, 1.6), dead: false, flash: 0 });
+    this.turrets.push({ g, head, z, x: side * (W - 0.7), y, hp: 3, fireT: rand(0.6, 1.6), dead: false, flash: 0 });
   }
 
   // chasseurs-rots qui volent au-dessus de la tranchée, un peu devant
@@ -266,6 +271,37 @@ export class TrenchMode {
     this.ctx.words.pop(pick(['POUF !', 'BAM !']), e.o.position.clone().setY(e.o.position.y + 2), '#ffd23f', 1.6);
   }
 
+  // la cible la plus proche devant : une tourelle sur le bord, ou un chasseur-rot
+  pickTarget() {
+    let best = null, bd = 1e9;
+    for (const t of this.turrets) {
+      const d = this.z - t.z;
+      if (!t.dead && d > 14 && d < 55 && d < bd) { bd = d; best = { x: t.x, y: t.y + 0.4, z: t.z, ref: t }; }
+    }
+    for (const e of this.flyers) {
+      if (e.dead || e.big) continue;
+      const P = e.o.position, d = this.z - P.z;
+      if (d > 6 && d < 60 && d < bd) { bd = d; best = { x: P.x, y: P.y, z: P.z - this.speed * 0.15, ref: e }; }
+    }
+    return best;
+  }
+  // cercle rouge qui tourne autour de la cible visée
+  showLock(tg, dt) {
+    if (!this.lock) {
+      this.lock = new THREE.Group();
+      const ring = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.5, 4, 1), new THREE.MeshBasicMaterial({ color: 0xff3a3a, transparent: true, opacity: 0.9, depthTest: false, fog: false }));
+      ring.renderOrder = 15; this.lock.add(ring);
+      this.lock.userData.ring = ring;
+      this.scene.add(this.lock);
+    }
+    this.lock.visible = !!tg;
+    if (!tg) return;
+    this.lock.position.set(tg.x, tg.y, tg.z);
+    this.lock.quaternion.copy(this.cam3.quaternion);
+    this.lock.userData.ring.rotation.z += dt * 3;
+    this.lock.scale.setScalar(1 + Math.sin(this.t * 10) * 0.08);
+  }
+
   // ---------- la boucle ----------
   update(dt) {
     this.t += dt;
@@ -286,9 +322,17 @@ export class TrenchMode {
       p.roll += (clamp((p.y - py) / Math.max(dt, 0.001) * 0.04, -0.4, 0.4) - p.roll) * Math.min(1, dt * 8);
       if (inp.mega && p.mega >= 1) this.megaProut();
       p.fireT -= dt;
+      const tg = this.guns ? this.pickTarget() : null;
+      this.showLock(tg, dt);
       if (this.guns && p.fireT <= 0) {
         p.fireT = 0.2;
-        for (const s of [-1, 1]) this.shoot(p.x + s * 2.6, p.y + 0.3, this.z - 1, 0, 0, -110, false);
+        for (const s of [-1, 1]) {
+          const x = p.x + s * 2.6, y = p.y + 0.3, z = this.z - 1;
+          if (tg) { // visée automatique : un enfant n'a pas à viser au millimètre
+            const d = new THREE.Vector3(tg.x - x, tg.y - y, tg.z - z).normalize().multiplyScalar(110);
+            this.shoot(x, y, z, d.x, d.y, d.z, false);
+          } else this.shoot(x, y, z, 0, 0, -110, false);
+        }
       }
     } else if (this.crashT !== undefined) {
       this.crashT -= dt; p.tilt += dt * 6; p.y = Math.max(0.5, p.y - dt * 4);
@@ -303,17 +347,17 @@ export class TrenchMode {
 
     // la tranchée défile : on ajoute des morceaux devant, on enlève ceux de derrière
     const front = this.segs.length ? this.segs[this.segs.length - 1].z0 - SEG : 0;
-    if (front > this.z - 200) this.addSeg(front);
+    if (front > this.z - 380) this.addSeg(front);
     this.segs = this.segs.filter((s) => { if (s.z0 - SEG > this.z + 30) { this.root.remove(s.g); return false; } return true; });
     // ce que le scénario demande de placer devant
     if (this.mode !== 'calme' && this.mode !== 'fin') {
-      while (this.genZ > this.z - 170) {
+      while (this.genZ > this.z - 300) {
         this.genZ -= this.mode === 'barres' ? rand(48, 60) : rand(26, 36);
         if (this.mode === 'tourelles') this.addTurret(this.genZ);
         if (this.mode === 'barres') { this.addBar(this.genZ); if (Math.random() < 0.5) this.addTurret(this.genZ - 15); }
         if (this.mode === 'chasseurs' && Math.random() < 0.4) this.addTurret(this.genZ);
       }
-    } else this.genZ = Math.min(this.genZ, this.z - 170);
+    } else this.genZ = Math.min(this.genZ, this.z - 300);
 
     // les barres
     const S = { x: p.x, y: p.y };
@@ -333,9 +377,9 @@ export class TrenchMode {
     this.turrets = this.turrets.filter((t) => {
       if (t.z > this.z + 30) { this.root.remove(t.g); return false; }
       if (t.dead) return true;
-      t.g.lookAt(p.x, t.g.position.y, this.z);
+      t.head.lookAt(p.x, p.y, this.z);
       const d = t.z - this.z;
-      if (d < -12 && d > -110) {
+      if (d < -12 && d > -80) {
         t.fireT -= dt;
         if (t.fireT <= 0) {
           t.fireT = rand(1.4, 2.4) / D.flightFire;
@@ -382,13 +426,13 @@ export class TrenchMode {
       s.life -= dt; s.g.position.addScaledVector(s.v, dt);
       const P = s.g.position;
       let gone = s.life <= 0;
-      if (!gone) for (const t of this.turrets) if (!t.dead && Math.abs(P.z - t.z) < 2.2 && Math.abs(P.x - t.x) < 3 && Math.abs(P.y - t.y) < 3.5) {
+      if (!gone) for (const t of this.turrets) if (!t.dead && Math.abs(P.z - t.z) < 3 && Math.abs(P.x - t.x) < 3 && Math.abs(P.y - t.y) < 3.5) {
         t.hp -= 1; gone = true; sfx.hit();
         this.ctx.glows.burst(P.x, P.y, P.z, 0xeaffc0, 5, 5, { life: 0.25, s0: 0.4, s1: 0.1 });
         if (t.hp <= 0) this.killTurret(t);
         break;
       }
-      if (!gone) for (const e of this.flyers) if (!e.dead && !e.big && e.o.position.distanceTo(P) < 2.6) {
+      if (!gone) for (const e of this.flyers) if (!e.dead && !e.big && e.o.position.distanceTo(P) < 3.4) {
         e.hp -= 1; gone = true; sfx.hit();
         if (e.hp <= 0) this.killFlyer(e);
         break;
@@ -513,6 +557,7 @@ export class TrenchMode {
 
   dispose() {
     this.scene.remove(this.root, this.obj);
+    if (this.lock) this.scene.remove(this.lock);
     for (const e of this.flyers) this.scene.remove(e.o);
     for (const s of [...this.shots, ...this.eshots]) this.scene.remove(s.g);
     if (this.hole && this.hole.shot) this.scene.remove(this.hole.shot.g);
@@ -537,7 +582,7 @@ function* trenchRun(m) {
   yield 2;
   hud.objective('Détruis les tourelles sur les bords !');
   m.mode = 'tourelles';
-  m.say('hanpopo', 'Des tourelles sur les bords, gamin ! Tire-leur dessus !', 3.5);
+  m.say('hanpopo', 'Des tourelles sur les bords, gamin ! Ton vaisseau vise tout seul : passe près d\'elles !', 4);
   yield 14;
   m.mode = 'barres';
   hud.objective('Évite les barrières : passe dessous ou dessus !');
