@@ -287,3 +287,44 @@ body.phone #game.narrow #radio:not(.hidden) ~ #bossbar { top: 214px; }
 .trenchSight.good .ring::before, .trenchSight.good .ring::after { background: #8fff5a; }
 .trenchSight.good b::after { content: ' — MAINTENANT !'; color: #8fff5a; }
 @keyframes sightPulse { from { transform: scale(1); } to { transform: scale(1.08); } }
+
+/* le duel à la Street Fighter */
+#hud.versus #controls, #hud.versus #hearts, #hud.versus #objective, #hud.versus #bossbar { display: none !important; }
+#vs { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+#vs .vsTop { position: absolute; top: 58px; left: 8px; right: 8px; display: flex; align-items: flex-start; gap: 6px; }
+#vs .vsSide { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+#vs .vsSide > div { flex: 1; min-width: 0; }
+#vs .vsSide.R { text-align: right; }
+#vs .vsSide img { width: 46px; height: 46px; border-radius: 50%; border: 3px solid var(--ink); background: #fff7e0; object-fit: cover; }
+#vs .vsSide b { font-size: 15px; color: #fff; text-shadow: 0 2px 0 var(--ink); }
+#vs .vsBar { height: 18px; border: 3px solid var(--ink); border-radius: 9px; background: #5a1a1a; overflow: hidden; }
+#vs .vsBar i { display: block; height: 100%; background: linear-gradient(180deg, #b8ff8a, #4fc23a); transition: width .15s; }
+#vs .R .vsBar { transform: scaleX(-1); }
+#vs .R .vsBar i { background: linear-gradient(180deg, #e2b8ff, #8a3fd0); }
+#vs .vsGauge { margin-top: 3px; height: 8px; width: 70%; border: 2px solid var(--ink); border-radius: 5px; background: #2a2232; overflow: hidden; }
+#vs .vsGauge i { display: block; height: 100%; background: #8fff5a; }
+#vs .vsGauge.full { box-shadow: 0 0 10px #8fff5a; }
+#vs .pips { color: #ffd23f; font-size: 16px; text-shadow: 0 2px 0 var(--ink); }
+#vs .vsTime { font-size: 30px; color: #fff; min-width: 48px; text-align: center; text-shadow: 0 3px 0 var(--ink); background: rgba(27,16,38,.75); border: 3px solid var(--ink); border-radius: 12px; padding: 0 6px; }
+#vs .vsBanner { position: absolute; left: 0; right: 0; top: 34%; text-align: center; font-size: clamp(40px, 11vw, 84px); color: #ffd23f;
+  -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 6px 0 var(--ink); animation: vsPop .35s ease-out; }
+#vs .vsBanner.hidden { display: none; }
+@keyframes vsPop { from { transform: scale(2.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+#vs .vsPad { position: absolute; bottom: 14px; display: flex; gap: 10px; pointer-events: auto; align-items: flex-end; }
+#vs .vsPad.left { left: 12px; }
+#vs .vsPad.right { right: 12px; }
+#vs .vsPad button { width: 74px; height: 74px; border-radius: 50%; border: 4px solid var(--ink); background: rgba(255,247,224,.9); font: inherit; font-size: 30px;
+  color: var(--ink); box-shadow: 0 5px 0 var(--ink); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; touch-action: none; user-select: none; }
+#vs .vsPad button b { font-size: 11px; }
+#vs .vsPad button.down { transform: translateY(4px); box-shadow: 0 1px 0 var(--ink); }
+#vs .vsPad .at { width: 92px; height: 92px; background: linear-gradient(180deg, #b8ff8a, #4fc23a); }
+#vs .vsPad .bl { background: linear-gradient(180deg, #8fd3ff, #3a7fd0); }
+#vs .vsPad .sp { opacity: .5; }
+#vs .vsPad .sp.ready { opacity: 1; background: linear-gradient(180deg, #d8ffb8, #8fff5a); animation: sightPulse .5s ease-in-out infinite alternate; }
+#vs .vsPad.left button { width: 70px; height: 70px; }
+#game.narrow #vs .vsPad button { width: 60px; height: 60px; font-size: 24px; }
+#game.narrow #vs .vsPad .at { width: 76px; height: 76px; }
+#game.narrow #vs .vsPad { gap: 6px; }
+#game.narrow #vs .vsSide img { width: 36px; height: 36px; }
+#game.narrow #vs .vsSide b { font-size: 12px; }
+#hud.versus #radio { top: 118px !important; }

@@ -186,7 +186,7 @@ export const MISSIONS = [
   },
   {
     id: 6, name: 'Le cœur de l\'Étoile Puante', desc: 'Dans la station, puis le grand duel final contre Dark Roteur !',
-    theme: 'station', icon: 'assets/persos/roteur.webp', parts: ['foot'],
+    theme: 'station', icon: 'assets/persos/roteur.webp', parts: ['foot', 'versus'],
     foot: { script: footStation, start: [0, 0, 10], radius: 22, indoor: true, music: 'foot' },
     intro: [
       N('À l\'intérieur de l\'Étoile Puante… ça sent TRÈS, TRÈS fort.'),
@@ -350,16 +350,13 @@ export function* footStation(g) {
   g.say('roteur', 'Alors, petit rigolo… On se retrouve enfin. BUUUURP !', 4);
   g.ctx.music('duel');
   hud.banner('DARK ROTEUR !', 2.5);
-  yield 2;
-  const r = g.spawnRoteur(0, -12, { rage: true });
-  hud.boss('DARK ROTEUR', 1);
-  hud.objective('Le duel final : bats Dark Roteur !');
-  yield 1;
-  hud.tip('block');
-  yield 5;
-  hud.tip(null);
-  yield () => r.dead;
-  g.hero.cheer = true;
-  yield 3.5;
-  g.result = { type: 'win' };
+  yield 2.5;
+  g.result = { type: 'next', part: 'versus' }; // le duel final, à la Street Fighter
 }
+
+// le duel libre (bouton « 🥊 Duel » de l'accueil)
+export const DUEL = {
+  id: 'duel', name: 'Duel contre Dark Roteur', theme: 'station', parts: ['versus'],
+  intro: [S('roteur', 'Encore toi, petit rigolo ? En garde ! BUUURP !'), S('lucas', 'Que le Gaz soit avec moi !')],
+  outro: [S('lucas_rire', 'Ha ha ! Encore gagné !'), S('roteur', 'Grrr… La prochaine fois, je t\'aurai… BURP.')],
+};

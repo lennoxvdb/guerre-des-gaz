@@ -14,18 +14,25 @@ export async function loadKnight() {
   gltf = await new Promise((res, rej) => new GLTFLoader().load('assets/3d/trooper.glb', res, undefined, rej));
   clips = {};
   for (const c of gltf.animations) clips[c.name] = c;
-  // notre Lucas 3D (s'il manque, on garde l'ancien Lucas fait avec le Knight)
-  try {
-    lucasSrc = await new FBXLoader().loadAsync('assets/3d/lucas.fbx');
-    lucasSrc.traverse((o) => {
-      if (!o.isMesh) return;
-      if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals(); // le fichier de Mixamo n'en a pas : sans elles, Lucas serait tout noir
-      if (o.material && o.material.map) lucasTex = o.material.map;
-    });
-    if (lucasTex) lucasTex.colorSpace = THREE.SRGBColorSpace;
-  } catch (e) { console.warn('Lucas 3D introuvable, on garde l\'ancien', e); lucasSrc = null; }
+  // nos propres personnages 3D (s'il en manque un, on garde l'ancien, fait avec le Knight)
+  await Promise.all(Object.entries(MODELS).map(async ([kind, url]) => {
+    try {
+      const fbx = await new FBXLoader().loadAsync(url);
+      let tex = null;
+      fbx.traverse((o) => {
+        if (!o.isMesh) return;
+        if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals(); // le fichier de Mixamo n'en a pas : sans elles, tout serait noir
+        if (o.material && o.material.map) tex = o.material.map;
+      });
+      if (tex) tex.colorSpace = THREE.SRGBColorSpace;
+      SRC[kind] = { fbx, tex };
+    } catch (e) { console.warn(kind + ' 3D introuvable, on garde l\'ancien', e); }
+  }));
 }
-let lucasSrc = null, lucasTex = null;
+// nos personnages faits maison : dessin Gemini → TRELLIS → squelette Mixamo (voir CLAUDE.md)
+// Pour en ajouter un : déposer son .fbx dans assets/3d/ et l'écrire ici.
+const MODELS = { lucas: 'assets/3d/lucas.fbx' };
+const SRC = {};
 
 // les os du Knight → les os de Mixamo (et l'os « enfant » qui donne la direction de chaque os)
 const BONES = [
@@ -41,9 +48,9 @@ const _p = new THREE.Vector3(), _p2 = new THREE.Vector3(), _s = new THREE.Vector
 const GRIP_DIR = new THREE.Vector3(0, 0, 1);
 const findBone = (o, name) => o.getObjectByName('mixamorig' + name) || o.getObjectByName('mixamorig:' + name);
 
-// matière toon de notre Lucas, avec le flash blanc quand il est touché
-function lucasMaterial() {
-  const m = new THREE.MeshToonMaterial({ map: lucasTex, gradientMap: gradMap });
+// matière toon de nos personnages 3D, avec le flash blanc quand ils sont touchés
+function heroMaterial(kind) {
+  const m = new THREE.MeshToonMaterial({ map: SRC[kind].tex, gradientMap: gradMap });
   m.userData.uFlash = { value: 0 };
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uFlash = m.userData.uFlash;
@@ -51,7 +58,7 @@ function lucasMaterial() {
       .replace('#include <common>', '#include <common>\nuniform float uFlash;')
       .replace('#include <dithering_fragment>', '#include <dithering_fragment>\ngl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), uFlash);');
   };
-  m.customProgramCacheKey = () => 'lucas3d';
+  m.customProgramCacheKey = () => 'hero3d';
   return m;
 }
 
@@ -251,10 +258,11 @@ export class Fighter {
     });
     const head = model.getObjectByName('head');
     const hand = model.getObjectByName('handslotr');
-    if (kind === 'lucas' && lucasSrc) {
-      this.setupLucas3D(model, height, hand);
+    if (SRC[kind] && (kind === 'lucas' || kind === 'roteur')) {
+      this.setupLucas3D(model, height, hand, kind);
       this.saber = null;
-      this.replaceSaber(makeCustomSaber()); // le sabre fabriqué dans l'atelier, bien serré dans la main de Lucas
+      // Lucas : le sabre fabriqué dans l'atelier ; Dark Roteur : son sabre violet ; bien serrés dans la main
+      this.replaceSaber(kind === 'lucas' ? makeCustomSaber() : makeSaber(0xb04cff, 0xf3dcff));
     } else if (kind === 'lucas') {
       const hair = lucasHair(); hair.position.set(0, 0.12, -0.05); head.add(hair);
       this.saber = makeCustomSaber(); // le sabre fabriqué dans l'atelier
@@ -321,15 +329,15 @@ export class Fighter {
   }
 
   // ---------- notre Lucas 3D ----------
-  setupLucas3D(model, height, knightSlot) {
+  setupLucas3D(model, height, knightSlot, kind = 'lucas') {
     // le Knight reste là, invisible : c'est lui qui joue les animations
     model.traverse((o) => { if (o.isMesh) o.visible = false; });
-    const lucas = skeletonClone(lucasSrc);
+    const lucas = skeletonClone(SRC[kind].fbx);
     lucas.animations = [];
-    const box = new THREE.Box3().setFromObject(lucasSrc);
+    const box = new THREE.Box3().setFromObject(SRC[kind].fbx);
     const k = height * 1.08 / (box.max.y - box.min.y); // un peu plus grand que l'ancien Lucas : on le voit bien de haut
     lucas.scale.setScalar(k);
-    this.mat = lucasMaterial();
+    this.mat = heroMaterial(kind);
     lucas.traverse((o) => { if (o.isMesh) { o.material = this.mat; o.castShadow = true; o.frustumCulled = false; } });
     this.root.add(lucas);
     this.root.updateMatrixWorld(true);
