@@ -44,5 +44,16 @@ window.gdgBot = (input, mode, name) => {
     if (mode.bossE && ['aim', 'plunge'].includes(mode.bossE.phase)) mx += (p.x - mode.bossE.x > 0 ? 1 : -1) * 3;
     const l = Math.hypot(mx, my); input.move.x = l > 1 ? mx / l : mx; input.move.y = l > 1 ? my / l : my;
     if (p.mega >= 1 && mode.bossE) input.mega = true;
+  } else if (name === 'trench') {
+    // il passe par le trou libre de la prochaine barrière, et tire la torpille
+    const p = mode.ship;
+    let tx = 0, ty = 4.8;
+    let next = null;
+    for (const o of mode.obst) if (o.z < mode.z && mode.z - o.z < 45 && (!next || o.z > next.z)) next = o;
+    if (next) { const b = next.box; if (b.y0 > 1) ty = 2.4; else if (b.y1 < 6) ty = 7.5; else if (b.x1 < 2) { tx = 4.2; } else if (b.x0 > -2) { tx = -4.2; } }
+    const mx = (tx - p.x) * 0.6, my = (ty - p.y) * 0.6;
+    input.move.x = Math.max(-1, Math.min(1, mx)); input.move.y = Math.max(-1, Math.min(1, my));
+    input.action = Math.random() < 0.05;
+    if (p.mega >= 1) input.mega = true;
   }
 };

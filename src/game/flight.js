@@ -15,6 +15,10 @@ const beamGeo = new THREE.CapsuleGeometry(0.11, 0.9, 4, 8).rotateX(Math.PI / 2);
 const beamCore = new THREE.MeshBasicMaterial({ color: 0xf0ffd8 });
 const beamGlowGeo = new THREE.CapsuleGeometry(0.24, 1.0, 4, 8).rotateX(Math.PI / 2);
 const beamGlow = new THREE.MeshBasicMaterial({ color: 0x6dff3a, transparent: true, opacity: 0.6, depthWrite: false });
+// les tirs ennemis : une seule forme pour tous (cœur rose vif, bien visible même sur le sable clair)
+const eshotGeo = new THREE.SphereGeometry(0.26, 10, 8), eshotMat = new THREE.MeshBasicMaterial({ color: 0xff5ad8 });
+const eshotRimGeo = new THREE.SphereGeometry(0.4, 10, 8), eshotRim = new THREE.MeshBasicMaterial({ color: 0x2a0a3a, side: THREE.BackSide });
+beamGeo.userData.keep = beamGlowGeo.userData.keep = eshotGeo.userData.keep = eshotRimGeo.userData.keep = true;
 function beam() {
   const g = new THREE.Group();
   g.add(new THREE.Mesh(beamGeo, beamCore), new THREE.Mesh(beamGlowGeo, beamGlow));
@@ -32,6 +36,8 @@ export class FlightMode {
     this.ctx = ctx; this.scene = ctx.scene; this.world = ctx.world;
     this.t = 0; this.result = null;
     this.speed = 8;
+    this.from = opts.from || null; this.cp = null; // point de reprise (on recommence au boss si on perd contre lui)
+    this.revived = false;
     this.enemies = []; this.shots = []; this.eshots = []; this.pickups = []; this.decor = [];
     this.R = rng(5);
     const p = this.ship = {
@@ -87,6 +93,7 @@ export class FlightMode {
   }
 
   say(who, text, dur) { this.ctx.hud.radio(who, text, dur); }
+  checkpoint(name) { this.cp = name; }
   get alive() { return this.enemies.filter((e) => !e.dead).length; }
   clear() { return () => this.alive === 0; }
 
@@ -164,7 +171,11 @@ export class FlightMode {
         e.hp--; e.flash = 0.08;
         this.ctx.hud.boss(e.name, Math.max(0, e.hp / e.maxHp));
         if (e.hp <= 0) this.kill(e); else sfx.hit();
-      } else if (Math.random() < 0.25) { this.ctx.words.pop('TOC !', this.wp(x, y).setY(ALT + 1), '#ffffff', 0.9); sfx.clash(); }
+      } else {
+        const w = this.wp(x, y);
+        this.ctx.glows.burst(w.x, ALT + 0.5, w.z, 0xffffff, 3, 4, { life: 0.18, s0: 0.4, s1: 0.1 }); // ça rebondit : c'est fermé
+        if (Math.random() < 0.25) { this.ctx.words.pop('TOC !', w.setY(ALT + 1), '#ffffff', 0.9); sfx.clash(); }
+      }
       return true;
     }
     for (const tu of U.turrets) {
@@ -273,7 +284,7 @@ export class FlightMode {
 
   eshot(x, y, ang, speed, fromGround) {
     const g = new THREE.Group();
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshBasicMaterial({ color: 0xf3dcff })), glowSprite(0xb04cff, 1.4, 0.95));
+    g.add(new THREE.Mesh(eshotGeo, eshotMat), new THREE.Mesh(eshotRimGeo, eshotRim), glowSprite(0xb04cff, 1.4, 0.95));
     this.scene.add(g);
     const s = { g, x, y, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, life: 5 };
     if (fromGround) { s.from = fromGround.clone(); s.rise = 0; }
@@ -288,6 +299,7 @@ export class FlightMode {
     this.ctx.puffs.burst(w.x, w.y, w.z, 0x9be36b, 10, 5, { life: 0.8, s0: 0.8, s1: 2 });
     this.ctx.glows.burst(w.x, w.y, w.z, 0xffb04a, 8, 7, { life: 0.3, s0: 0.6, s1: 0.1 });
     sfx.boom();
+    this.ctx.hitstop(e.kind === 'boss' || e.kind === 'star' ? 0.18 : 0.035);
     this.ship.mega = Math.min(1, this.ship.mega + 0.06); this.ctx.hud.mega(this.ship.mega);
     if (e.kind === 'turret') { this.scene.remove(e.g); if (Math.random() < 0.3) this.dropPickup(this.toPlane(e.G)); return; }
     if (e.kind === 'boss') return this.killBoss(e);
@@ -351,7 +363,16 @@ export class FlightMode {
     const w = this.wp(p.x, p.y);
     this.ctx.puffs.burst(w.x, w.y, w.z, 0xc38be8, 12, 4, { life: 0.8, s0: 0.6, s1: 1.6 });
     this.ctx.hud.hearts(Math.max(0, p.hp), p.maxHp);
-    if (p.power > 1) p.power--;
+    p.hits = (p.hits || 0) + 1;
+    if (p.power > 1 && p.hits % 2 === 0) p.power--; // on perd un niveau de tir seulement tous les 2 coups
+    if (p.hp <= 0 && !this.revived) { // une deuxième chance, une seule fois
+      this.revived = true; p.hp = p.maxHp; p.inv = 3;
+      this.ctx.hud.hearts(p.hp, p.maxHp); sfx.heal();
+      this.ctx.words.pop('2e CHANCE !', w.clone().setY(ALT + 2), '#8fff5a', 2.2);
+      this.say('gazou', 'Abandonner, jamais ! Le Gaz, une deuxième chance te donne.', 3.5);
+      for (const s of this.eshots) s.life = 0;
+      return;
+    }
     if (p.hp <= 0) {
       this.crashT = 1.5;
       this.ctx.words.pop('OUPS !', w.clone().setY(ALT + 2), '#ff8a3d', 2);
@@ -434,8 +455,7 @@ export class FlightMode {
         const hw = this.wp(s.x, s.y);
         this.ctx.glows.burst(hw.x, hw.y, hw.z, 0xeaffc0, 3, 4, { life: 0.2, s0: 0.4, s1: 0.1 });
         if (e.kind === 'boss') this.ctx.hud.boss('CROISEUR-VENTOUSE', Math.max(0, e.hp / e.maxHp));
-        if (e.kind === 'rock' && e.hp > 0) sfx.hit();
-        if (e.hp <= 0) this.kill(e); else if (e.kind !== 'rot') sfx.hit();
+        if (e.hp <= 0) this.kill(e); else sfx.hit();
         break;
       }
       if (gone) this.scene.remove(s.o);
@@ -518,8 +538,9 @@ export class FlightMode {
       }
       this.wp(e.x, e.y, e.o.position);
       if (e.move !== 'boss') e.o.rotation.y = screenYaw(e.ang ?? Math.PI) + (this.chase && e.kind === 'rot' ? Math.PI : 0);
+      if (this.chase && e.kind !== 'boss' && e.kind !== 'star') { if (e.baseS === undefined) e.baseS = e.o.scale.x; e.o.scale.setScalar(e.baseS * (e.flash > 0 ? 1.25 : 1)); }
       if (e.o.userData.mat) e.o.userData.mat.color.setScalar(e.flash > 0 ? 3 : 1);
-      else if (e.o.userData.mats) for (const m of e.o.userData.mats) m.emissiveIntensity = e.flash > 0 ? 0.1 : m.userData.base || 0;
+      else if (e.o.userData.mats) for (const m of e.o.userData.mats) m.emissiveIntensity = e.flash > 0 ? 0.55 : m.userData.base || 0;
       e.sh.position.set(e.o.position.x, 0.04, e.o.position.z);
       // touche Lucas en fonçant dedans
       if (this.hitTest(e, p.x, p.y, 0.8)) { this.hurt(); if (e.kind !== 'boss' && e.kind !== 'star') { e.hp = 0; this.kill(e); } }

@@ -12,6 +12,10 @@ const RIDE = 0.9; // hauteur des motojets
 const V = () => new THREE.Vector3();
 const _a = V(), _b = V();
 const FWD_YAW = yawOf(SU.x, SU.z); // un pilote qui regarde vers le haut de l'écran
+// les tirs : formes et couleurs partagées (on en tire des centaines)
+const ESHOT_GEO = new THREE.SphereGeometry(0.22, 10, 8), ESHOT_MAT = new THREE.MeshBasicMaterial({ color: 0xf3dcff });
+const SHOT_GEO = new THREE.CapsuleGeometry(0.1, 0.8, 4, 8).rotateX(Math.PI / 2), SHOT_MAT = new THREE.MeshBasicMaterial({ color: 0xf0ffd8 });
+ESHOT_GEO.userData.keep = SHOT_GEO.userData.keep = true;
 
 // une motojet : corps allongé, guidon, ailerons, réacteur qui brille à l'arrière (le nez vers -z)
 export function makeSpeeder(color, glow) {
@@ -42,6 +46,8 @@ export class SpeederMode {
     this.ctx = ctx; this.scene = ctx.scene; this.world = ctx.world;
     this.t = 0; this.result = null;
     this.speed = 12;
+    this.from = opts.from || null; this.cp = null; // point de reprise (on recommence au boss si on perd contre lui)
+    this.revived = false;
     this.enemies = []; this.shots = []; this.eshots = []; this.trees = []; this.pickups = []; this.mines = [];
     this.R = rng(77);
     const p = this.player = { x: 0, y: 0, hp: opts.hp ?? ctx.diff.hp, maxHp: ctx.diff.hp, inv: 0, fireT: 0.5, mega: opts.mega ?? 0, tilt: 0, slashT: 0, slashCool: 0 };
@@ -70,6 +76,7 @@ export class SpeederMode {
   wp(x, y, out = V()) { return out.copy(this.B).addScaledVector(SR, x).addScaledVector(SU, y).setY(RIDE); }
   rel(w) { const dx = w.x - this.B.x, dz = w.z - this.B.z; return { x: dx * SR.x + dz * SR.z, y: dx * SU.x + dz * SU.z }; }
   say(who, text, dur) { this.ctx.hud.radio(who, text, dur); }
+  checkpoint(name) { this.cp = name; }
   get alive() { return this.enemies.filter((e) => !e.dead).length; }
   clear() { return () => this.alive === 0; }
 
@@ -108,9 +115,9 @@ export class SpeederMode {
 
   shoot(x, y, ang, speed, enemy) {
     const g = new THREE.Group();
-    if (enemy) g.add(new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshBasicMaterial({ color: 0xf3dcff })), glowSprite(0xb04cff, 1.4, 0.95));
+    if (enemy) g.add(new THREE.Mesh(ESHOT_GEO, ESHOT_MAT), glowSprite(0xb04cff, 1.4, 0.95));
     else {
-      const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.8, 4, 8).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xf0ffd8 }));
+      const b = new THREE.Mesh(SHOT_GEO, SHOT_MAT);
       b.rotation.y = screenYaw(ang) + Math.PI; g.add(b, glowSprite(0x6dff3a, 1.2, 0.7));
     }
     this.scene.add(g);
@@ -184,6 +191,14 @@ export class SpeederMode {
     const w = this.wp(p.x, p.y);
     this.ctx.puffs.burst(w.x, 1, w.z, 0xc38be8, 12, 4, { life: 0.8, s0: 0.6, s1: 1.6 });
     this.ctx.hud.hearts(Math.max(0, p.hp), p.maxHp);
+    if (p.hp <= 0 && !this.revived) { // une deuxième chance, une seule fois : Maître Gazou remplit les cœurs
+      this.revived = true; p.hp = p.maxHp; p.inv = 3;
+      this.ctx.hud.hearts(p.hp, p.maxHp); sfx.heal();
+      this.ctx.words.pop('2e CHANCE !', w.clone().setY(3), '#8fff5a', 2.2);
+      this.say('gazou', 'Abandonner, jamais ! Le Gaz, une deuxième chance te donne.', 3.5);
+      for (const s of this.eshots) s.life = 0;
+      return;
+    }
     if (p.hp <= 0) { this.crashT = 1.4; this.ctx.words.pop('OUPS !', w.clone().setY(3), '#ff8a3d', 2); }
   }
 
@@ -222,7 +237,10 @@ export class SpeederMode {
       p.y = clamp(p.y, -this.Yh * 0.75, this.Yh * 0.25);
       p.tilt += (clamp((p.x - px) / Math.max(dt, 0.001) * 0.05, -0.5, 0.5) - p.tilt) * Math.min(1, dt * 8);
       p.inv -= dt; p.slashCool -= dt; p.slashT -= dt;
-      if (inp.attack) this.slash();
+      // coup de sabre tout seul quand une motojet est juste à côté (le doigt est occupé à piloter)
+      let near = false;
+      for (const e of this.enemies) if (!e.dead && !e.boss && Math.abs(e.x - p.x) < 3.2 + e.r && Math.abs(e.y - p.y) < 2.2 + e.r) { near = true; break; }
+      if (inp.attack || near) this.slash();
       if (inp.mega && p.mega >= 1) this.megaProut();
       p.fireT -= dt;
       if (p.fireT <= 0) { p.fireT = 0.28; this.shoot(p.x, p.y + 2, 0, 26, false); }
@@ -286,6 +304,10 @@ export class SpeederMode {
       if (e.kind === 'moto') {
         e.y += (e.ty - e.y) * Math.min(1, dt * 0.8) + Math.sin(e.t * 0.7 + e.ph) * 0.6 * dt;
         e.ramT -= dt;
+        if (e.ramT < 0.7 && e.ramT > 0 && !e.warned) { e.warned = true; this.ctx.words.pop('!', this.wp(e.x, e.y).setY(3), '#ff4a3a', 1.6); }
+        if (e.ramT > 0 && e.ramT < 0.7) e.flash = Math.sin(e.t * 24) > 0 ? 0.05 : 0; // il clignote : il va foncer !
+        if (e.ramT <= 0) e.warned = false;
+        if (e.t > 12 && !e.leaving && e.y < p.y + 1) { e.leaving = true; e.ty = this.Yh + 12; } // il ne reste pas coincé derrière Lucas : il double et s'en va
         if (e.ramT < 0 && e.ramT > -1.1) { e.x += Math.sign(p.x - e.x) * 7 * dt; e.flash = Math.sin(e.t * 30) > 0 ? 0.05 : 0; } // il fonce sur le côté vers Lucas !
         else { if (e.ramT <= -1.1) e.ramT = rand(4, 7); e.x += Math.sin(e.t * 1.2 + e.ph) * 2.5 * dt; }
         e.x = clamp(e.x, -this.Xw - 1, this.Xw + 1);
@@ -373,18 +395,21 @@ export class SpeederMode {
 
 // arbres et rochers légers pour la forêt qui défile
 const trunkGeo = new THREE.CylinderGeometry(0.4, 0.7, 4, 8);
+const crownGeo = new THREE.SphereGeometry(1, 10, 8), rockGeo = new THREE.DodecahedronGeometry(0.9, 0);
+trunkGeo.userData.keep = crownGeo.userData.keep = rockGeo.userData.keep = true; // partagées par tous les arbres
 function swampTreeLite(R) {
   const g = new THREE.Group();
   const t = toon(trunkGeo, 0x5a4030, { outline: 0.06 }); t.position.y = 2; g.add(t);
   for (const [x, y, z, r] of [[0, 4.3, 0, 1.7], [1, 3.8, 0.3, 1.2], [-1, 3.9, -0.3, 1.3]]) {
-    const c = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), toonMat(R() < 0.5 ? 0x4f8a32 : 0x3f7a2a));
+    const c = new THREE.Mesh(crownGeo, toonMat(R() < 0.5 ? 0x4f8a32 : 0x3f7a2a));
+    c.scale.setScalar(r);
     c.position.set(x, y, z); g.add(c);
   }
   g.rotation.y = R() * 6;
   return g;
 }
 function rockLite(R) {
-  const g = toon(new THREE.DodecahedronGeometry(0.9, 0), R() < 0.5 ? 0x6a7048 : 0x4a5236, { outline: 0.06 });
+  const g = toon(rockGeo, R() < 0.5 ? 0x6a7048 : 0x4a5236, { outline: 0.06 });
   g.position.y = 0.5; g.rotation.set(R(), R() * 6, R());
   const w = new THREE.Group(); w.add(g);
   return w;

@@ -7,7 +7,7 @@
 // Repère : les combattants sont sur l'axe x (z = 0), le sol est à y = 0, la caméra regarde depuis +z.
 import * as THREE from 'three';
 import { Fighter, SaberTrail, KICK_POSES, makeSlash, updateSlash } from '../entities/fighter.js';
-import { canvasTex, glowSprite, toon } from '../engine/gfx.js';
+import { canvasTex, glowSprite, toon, autoDispose } from '../engine/gfx.js';
 import { sfx } from '../engine/audio.js';
 import { rand, clamp, pick } from './common.js';
 
@@ -48,10 +48,11 @@ function part(geo, color, x, y, z, o = {}) {
 
 export class VersusMode {
   constructor(ctx, opts = {}) {
+    this.easy = Math.min(3, opts.easy || 0); // le joueur a déjà perdu : Dark Roteur va un peu moins vite
     this.ctx = ctx; this.scene = ctx.scene; this.world = ctx.world;
     this.t = 0; this.result = null;
     this.player = { hp: ctx.diff.hp, mega: 0 }; // pour les étoiles de fin de mission
-    this.root = new THREE.Group(); this.scene.add(this.root);
+    this.root = autoDispose(new THREE.Group()); this.scene.add(this.root);
     // le décor de la station est caché : on construit la salle du trône (avec ses propres lumières)
     if (this.world) { this.oldWorldVis = this.world.group.visible; this.world.group.visible = false; }
     this.oldBg = this.scene.background; this.oldFog = this.scene.fog;
@@ -232,7 +233,8 @@ export class VersusMode {
     document.getElementById('hud').classList.add('versus');
   }
   updateHud(dt) {
-    const q = (s) => this.hud.querySelector(s);
+    const cache = this.hudQ || (this.hudQ = new Map());
+    const q = (s) => { let e = cache.get(s); if (!e) { e = this.hud.querySelector(s); cache.set(s, e); } return e; };
     for (const [P, s] of [[this.L, '.L'], [this.R, '.R']]) {
       P.shown += (P.hp - P.shown) * Math.min(1, dt * (P.shown > P.hp ? 2.2 : 10)); // la barre rouge qui descend doucement
       q(s + ' .vsBar i').style.width = Math.max(0, P.hp / P.maxHp * 100) + '%';
@@ -286,13 +288,13 @@ export class VersusMode {
     this.camPos.set(0, 7, 22);
     const go = () => {
       this.banner(this.winsL === 1 && this.winsR === 1 ? 'DERNIER ROUND !' : `ROUND ${this.round}`, 1.2);
-      setTimeout(() => { if (this.phase === 'intro') { this.banner('COMBAT !', 0.9, 'fight'); sfx.alarm(); } }, 1200);
+      this.later(() => { if (this.phase === 'intro') { this.banner('COMBAT !', 0.9, 'fight'); sfx.alarm(); } }, 1.2);
     };
     if (this.round === 1) {
       const sp = this.hud.querySelector('.vsSplash');
       sp.classList.remove('hidden');
-      setTimeout(() => sp.classList.add('hidden'), 1400);
-      setTimeout(go, 1400);
+      this.later(() => sp.classList.add('hidden'), 1.4);
+      this.later(go, 1.4);
       this.R.f.play('cheer', 1.2); // il se moque de Lucas
       this.say('roteur', 'En garde, petit rigolo ! Je vais te faire roter de peur ! BUUURP !', 3.5);
       sfx.burp();
@@ -308,7 +310,7 @@ export class VersusMode {
     if (why !== 'time') { this.slow = 1.4; sfx.boom(); this.ctx.flash(0.6); this.shakeT = 0.5; this.cheer(winner === this.L ? -1 : 1, 1); }
     loser.state = 'ko'; loser.flip = null; loser.f.model.rotation.set(0, 0, 0); loser.f.model.position.set(0, 0, 0); loser.f.play('death2', 1.1); loser.f.guard = false;
     winner.state = 'win'; winner.f.guard = false;
-    setTimeout(() => { if (winner.state === 'win') { winner.f.play('cheer', 1); sfx.win(); } }, 1300);
+    this.later(() => { if (winner.state === 'win') { winner.f.play('cheer', 1); sfx.win(); } }, 1.3);
     if (winner === this.L) this.say('lucas_rire', pick(['Ha ha ! Pris dans le gaz !', 'Prrrout ! Gagné !', 'Que le Gaz soit avec moi !']), 2.5);
     else this.say('roteur', pick(['BUUURP ! Trop facile !', 'Ha ha ha ! Le côté obscur du rot !']), 2.5);
   }
@@ -362,7 +364,7 @@ export class VersusMode {
       this.root.add(ring);
       this.waves.push({ o: ring, x: P.x + P.face * 1, vx: P.face * (lucas ? 16 : -16), t: -i * 0.07, dir: P.face });
     }
-    setTimeout(() => {
+    this.later(() => {
       if (this.phase !== 'fight' || P.state === 'ko') return;
       // les boules en face sont renvoyées
       for (const s of this.shots) if (s.owner === O && (s.x - P.x) * P.face > 0 && Math.abs(s.x - P.x) < 8 && s.kind !== 'mega') { s.vx = -s.vx * 1.2; s.owner = P; }
@@ -382,7 +384,7 @@ export class VersusMode {
         if (O.blocking && O.face === -P.face) { O.shieldGlow = 1; this.pop('TIENS BON !', _a.set(O.x, O.y + 3, 0.5).clone(), '#6fd3ff', 1.3); }
         else { O.vx = -P.face * 13; O.vy = 4; O.y = 0.01; O.state = 'hit'; O.stun = 0.5; O.f.play('hit', 1); this.pop('ATTIRÉ !', _a.set(O.x, O.y + 3, 0.5).clone(), '#c38bff', 1.4); }
       }
-    }, 200);
+    }, 0.2);
   }
 
   // ---------- un coup ----------
@@ -412,7 +414,7 @@ export class VersusMode {
     }
     if (lucas) { P.gauge -= 0.5; this.banner('PROUT-KEN !', 0.9, 'small'); }
     P.mt = P.f.play('spell', 1.4, 0.7); P.move.len = P.mt;
-    setTimeout(() => { if (P.state === 'attack' && this.phase === 'fight') this.throwBall(P, lucas ? 'prout' : 'rot'); }, 280);
+    this.later(() => { if (P.state === 'attack' && this.phase === 'fight') this.throwBall(P, lucas ? 'prout' : 'rot'); }, 0.28);
   }
   throwBall(P, kind) {
     const o = new THREE.Group();
@@ -450,7 +452,7 @@ export class VersusMode {
       if (P.blockAge < 0.25 && !opt.shot && A) {
         this.pop('PARADE PARFAITE !', pos.clone().setY(pos.y + 1), '#6fd3ff', 1.6);
         P.gauge = Math.min(1, P.gauge + 0.1);
-        setTimeout(() => { if (this.phase === 'fight' && P.state === 'idle') { P.blocking = false; this.startMove(P, 'counter'); } }, 120);
+        this.later(() => { if (this.phase === 'fight' && P.state === 'idle') { P.blocking = false; this.startMove(P, 'counter'); } }, 0.12);
       } else this.pop('CLANG !', pos, '#ffd23f', 1.1);
       if (P.hp <= 0) { P.hp = 0; this.endRound(P.other, 'ko'); }
       return true;
@@ -615,7 +617,7 @@ export class VersusMode {
     A.t -= dt; A.ballCool -= dt;
     // parer quand Lucas attaque tout près (pas à tous les coups !)
     if (L.state === 'attack' && d < 3.2 && R.state !== 'attack') {
-      if (A.blockRoll === undefined) A.blockRoll = Math.random() < (rage ? 0.42 : 0.3);
+      if (A.blockRoll === undefined) A.blockRoll = Math.random() < (rage ? 0.42 : 0.3) * (1 - 0.22 * this.easy);
       if (A.blockRoll) { ctl.block = true; return ctl; }
     } else A.blockRoll = undefined;
     // son super coup quand sa jauge est pleine : la vague du Méga-Rot (il faut sauter !)
@@ -625,7 +627,7 @@ export class VersusMode {
       this.say('roteur', 'MÉGA-ROOOOOT !', 2);
       R.state = 'attack'; R.move = { name: 'wave', done: false };
       R.mt = R.f.play('raise', 1.5, 0.6); R.move.len = R.mt;
-      setTimeout(() => { if (R.state === 'attack' && this.phase === 'fight') this.throwBall(R, 'wave'); }, 700);
+      this.later(() => { if (R.state === 'attack' && this.phase === 'fight') this.throwBall(R, 'wave'); }, 0.7);
       return ctl;
     }
     if (A.plan && A.plan.t > 0) {
@@ -635,7 +637,7 @@ export class VersusMode {
       return ctl;
     }
     if (A.t > 0) return ctl;
-    A.t = rand(0.25, 0.55) * (rage ? 0.7 : 1);
+    A.t = rand(0.25, 0.55) * (rage ? 0.7 : 1) * (1 + 0.3 * this.easy); // plus lent après chaque défaite du joueur
     const r = Math.random();
     let plan;
     if (d > 4.5) {
@@ -651,7 +653,7 @@ export class VersusMode {
     } else if (r < 0.5) {
       plan = { t: 0.1, ctl: { attack: true }, once: true };
       // parfois un combo de 2 ou 3 coups
-      if (Math.random() < (rage ? 0.7 : 0.4)) setTimeout(() => { if (R.state === 'attack') this.startMoveAI(R); }, 380);
+      if (Math.random() < (rage ? 0.7 : 0.4)) this.later(() => { if (R.state === 'attack') this.startMoveAI(R); }, 0.38);
     } else if (r < 0.62) plan = { t: 0.1, ctl: { kick: true }, once: true };
     else if (r < 0.8) plan = { t: rand(0.4, 0.8), ctl: { block: true } };
     else plan = { t: rand(0.3, 0.5), ctl: { move: -toward } };
@@ -667,7 +669,14 @@ export class VersusMode {
   }
 
   // ---------- la boucle ----------
+  // faire quelque chose un peu plus tard, en temps de jeu (s'arrête pendant la pause, oublié si on quitte)
+  later(fn, sec) { (this.timers || (this.timers = [])).push({ t: sec, fn }); }
   update(dtReal) {
+    if (this.timers && this.timers.length) {
+      const due = [];
+      this.timers = this.timers.filter((k) => { k.t -= dtReal; if (k.t <= 0) { due.push(k.fn); return false; } return true; });
+      for (const fn of due) fn();
+    }
     let dt = dtReal;
     if (this.slow > 0) { this.slow -= dtReal; dt *= 0.25; }
     const frozen = this.freeze > 0; // l'arrêt sur image quand un coup touche
@@ -811,6 +820,7 @@ export class VersusMode {
   }
 
   dispose() {
+    this.timers = [];
     for (const P of [this.L, this.R]) { this.scene.remove(P.f.root); P.trail.dispose(this.scene); P.footTrail.dispose(this.scene); }
     this.scene.remove(this.root);
     if (this.world) this.world.group.visible = this.oldWorldVis;

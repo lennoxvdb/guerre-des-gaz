@@ -1,7 +1,7 @@
 // Les décors en 3D : désert de Sablon, plateau des Rots, marais de Gazouland, cité des nuages,
 // intérieur de l'Étoile Puante, et l'espace (pour le vol).
 import * as THREE from 'three';
-import { canvasTex, rng, toon, toonMat, TEX, flatSprite, standee, shadowBlob, screenYaw, glowSprite } from '../engine/gfx.js';
+import { canvasTex, rng, toon, toonMat, TEX, flatSprite, standee, shadowBlob, screenYaw, glowSprite, mergeStatic } from '../engine/gfx.js';
 
 export const THEMES = {
   sablon: {
@@ -293,6 +293,12 @@ export class World {
 
     ({ sablon: () => this.buildSablon(), plateau: () => this.buildPlateau(), marais: () => this.buildMarais(),
       nuages: () => this.buildNuages(), station: () => this.buildStation(), espace: () => {} })[themeName]();
+    // chaque élément du décor (arbre, rocher, dôme…) : ses morceaux de même couleur collés ensemble → 5 fois moins de dessins
+    for (const c of this.group.children) {
+      if (c.type !== 'Group' || c.userData.sprite) continue;
+      let n = 0; c.traverse((o) => { if (o.isMesh) n++; });
+      if (n > 2) mergeStatic(c);
+    }
   }
 
   // h : hauteur de l'obstacle (avec le jetpack, Lucas vole au-dessus de ce qui est bas)
@@ -467,7 +473,7 @@ export class World {
     if (this.wc && this.wc.userData.sprite) this.wc.userData.sprite.position.y = (this.wcLift ?? 1.0) + Math.sin(t * 2) * 0.08;
   }
 
-  dispose() { this.scene.remove(this.group); }
+  dispose() { this.scene.remove(this.group); if (this.ground && this.ground.material.map) this.ground.material.map.dispose(); }
 }
 
 // ---------- le décor qui défile pendant le vol (au-dessus du désert) ----------

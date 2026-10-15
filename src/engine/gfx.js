@@ -1,5 +1,6 @@
 // Outils graphiques 3D (repris de Starshiprout) : style cartoon, dessins, nuages de gaz, mots « POUF ! ».
 import * as THREE from 'three';
+import { mergeGeometries } from '../../lib/BufferGeometryUtils.js';
 
 export const INK = 0x3a2312;
 
@@ -52,12 +53,21 @@ export function outlineGeo(geo, thick) {
   for (let i = 0; i < p.count; i++) p.setXYZ(i, p.getX(i) + n.getX(i) * thick, p.getY(i) + n.getY(i) * thick, p.getZ(i) + n.getZ(i) * thick);
   return g;
 }
+const outlineCache = new WeakMap();
 export function toon(geo, color, { outline = 0.06, shadow = true, emissive = 0 } = {}) {
   const grp = new THREE.Group();
   const m = new THREE.Mesh(geo, toonMat(color, emissive));
   m.castShadow = shadow; m.receiveShadow = true;
   grp.add(m);
-  if (outline) grp.add(new THREE.Mesh(outlineGeo(geo, outline), outlineMat));
+  if (outline) {
+    // une forme partagée garde un seul contour pour tous ses exemplaires
+    let og;
+    if (geo.userData.keep) {
+      let byT = outlineCache.get(geo); if (!byT) outlineCache.set(geo, byT = new Map());
+      og = byT.get(outline); if (!og) { og = outlineGeo(geo, outline); og.userData.keep = true; byT.set(outline, og); }
+    } else og = outlineGeo(geo, outline);
+    grp.add(new THREE.Mesh(og, outlineMat));
+  }
   return grp;
 }
 
@@ -257,4 +267,44 @@ export class Words {
     });
   }
   clear() { for (const s of this.list) this.scene.remove(s); this.list = []; }
+}
+
+// enlever un objet libère aussi ses formes dans la carte graphique (sinon le jeu ralentit au fil des parties).
+// Les formes partagées (userData.keep), les personnages animés et les sprites ne sont pas touchés.
+export function freeGeo(o) {
+  if (o && o.traverse) o.traverse((c) => { if (c.geometry && !c.isSkinnedMesh && !c.isInstancedMesh && !c.isSprite && !c.geometry.userData.keep) c.geometry.dispose(); });
+}
+export function autoDispose(parent) {
+  const rm = parent.remove.bind(parent);
+  parent.remove = (...objs) => { rm(...objs); for (const o of objs) freeGeo(o); return parent; };
+  return parent;
+}
+
+// Décor qui ne bouge pas : on colle ensemble tous les morceaux qui ont la même couleur (un seul dessin au lieu de dizaines).
+// Beaucoup plus léger pour le téléphone (la tranchée passe de ~360 à ~60 dessins par image).
+const _inv = new THREE.Matrix4(), _mm = new THREE.Matrix4();
+export function mergeStatic(group) {
+  group.updateMatrixWorld(true);
+  _inv.copy(group.matrixWorld).invert();
+  const byMat = new Map(), olds = [];
+  group.traverse((o) => {
+    if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || Array.isArray(o.material)) return;
+    let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+    if (!g.attributes.normal) g.computeVertexNormals();
+    if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    g.applyMatrix4(_mm.multiplyMatrices(_inv, o.matrixWorld));
+    if (!byMat.has(o.material)) byMat.set(o.material, { geos: [], shadow: false, order: o.renderOrder });
+    const e = byMat.get(o.material); e.geos.push(g); e.shadow = e.shadow || o.castShadow;
+    olds.push(o);
+  });
+  for (const o of olds) { if (!o.geometry.userData.keep) o.geometry.dispose(); o.parent.remove(o); }
+  for (const c of [...group.children]) if (c.type === 'Group' && !c.children.length) group.remove(c);
+  for (const [mat, e] of byMat) {
+    const m = new THREE.Mesh(e.geos.length > 1 ? mergeGeometries(e.geos) : e.geos[0], mat);
+    for (const g of e.geos) if (e.geos.length > 1) g.dispose();
+    m.castShadow = e.shadow; m.receiveShadow = true; m.renderOrder = e.order;
+    group.add(m);
+  }
+  return group;
 }

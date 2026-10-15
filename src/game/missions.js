@@ -5,7 +5,7 @@ import { dist2, pick } from './common.js';
 export const DIFF = {
   hp: 6, soldierHp: 3, roteurHp: 56, aimTime: 0.85, boltSpeed: 6.5, shootCool: 2.6, windup: 0.75, chaseSpeed: 3.6,
   maxAimers: 2, blockAnyDir: true, roteurWindup: 0.8, stunTime: 3,
-  rotHp: 3, turretHp: 5, cruiserHp: 300, flightFire: 1.15, flightBolt: 7, starHp: 160, bolideHp: 70, capitaineHp: 22, flightSpeed: 1,
+  rotHp: 3, turretHp: 5, cruiserHp: 300, flightFire: 1.15, flightBolt: 7, starHp: 110, bolideHp: 70, capitaineHp: 26, flightSpeed: 1,
 };
 
 const N = (text) => ({ who: null, text });
@@ -38,13 +38,13 @@ export function* footSablon(g) {
   hud.objective('Chasse les soldats !');
   g.dropGroup(['ventouse', 'tireur', 'ventouse', 'tireur'], null, 7);
   yield 2;
-  while (g.alive > 0) { yield 6.5; if (g.alive > 0) g.strafe(); }
+  while (g.alive > 0) { const t0 = g.t; yield () => g.alive === 0 || g.t - t0 > 6.5; if (g.alive > 0) g.strafe(); }
   if (g.hero.mega >= 1) { g.say('gazou', 'Pleine, ta jauge de gaz est ! Appuie sur 💨 pour le Méga-Prout !', 4); hud.tip('mega'); }
   else g.say('pqr', 'Encore des soldats ! Nous sommes perdus, perdus, PERDUS !', 3.5);
   yield 2;
   g.dropGroup(['tireur', 'ventouse', 'tireur', 'ventouse', 'tireur'], null, 8);
   yield 2;
-  while (g.alive > 0) { yield 6; if (g.alive > 0) g.strafe(); }
+  while (g.alive > 0) { const t0 = g.t; yield () => g.alive === 0 || g.t - t0 > 6; if (g.alive > 0) g.strafe(); }
   hud.tip(null);
   yield 1;
   g.say('gazou', 'Ton vaisseau, rejoins ! Au nord, il est. Ah, et R2-WC le répare encore…', 4.5);
@@ -55,8 +55,9 @@ export function* footSablon(g) {
   for (;;) {
     yield near;
     hud.action('MONTER');
-    yield () => !near() || g.ctx.input.action;
-    if (near() && g.ctx.input.action) break;
+    const t0 = g.t; // il monte tout seul s'il reste un peu à côté du vaisseau
+    yield () => !near() || g.ctx.input.action || g.t - t0 > 1.2;
+    if (near()) break;
     hud.action(null);
   }
   hud.action(null); hud.pointer(null);
@@ -71,6 +72,7 @@ export function* flightSablon(f) {
   f.say('hanpopo', 'Décollage ! Je te couvre, gamin. Glisse le doigt pour piloter, ton vaisseau tire tout seul !', 4.5);
   hud.objective('Dégonfle les vaisseaux de Dark Roteur');
   yield 3;
+  if (f.from !== 'boss') {
   f.rotWave('line', 5); yield 4;
   f.turrets(2); yield 3;
   f.rotWave('v', 7); yield 2; yield f.clear();
@@ -83,12 +85,11 @@ export function* flightSablon(f) {
   f.rotWave('hover', 3); yield 2; yield f.clear();
   f.say('r2wc', 'Bip bip ! Bip bouuu ! (traduction : ils arrivent par en bas, attention !)', 3.5);
   f.rotWave('lowRight', 5); yield 2; f.rotWave('kami', 4); yield 3;
-  f.rotWave('line', 6); f.turrets(2); yield 4;
-  f.rotWave('v', 7); yield 2; f.rotWave('lowLeft', 4); yield 2; yield f.clear();
+  f.rotWave('v', 7); f.turrets(2); yield 2; f.rotWave('lowLeft', 4); yield 2; yield f.clear();
   f.say('gazou', 'Les canons au sol, vise ! Ils lâchent souvent des bonus.', 3.5);
-  f.turrets(3); yield 2.5; f.rotWave('left', 4); yield 2; f.rotWave('right', 4); yield 2; f.rotWave('kami', 4); yield 3;
-  f.rotWave('hover', 4); yield 2; yield f.clear();
-  f.rotWave('lowRight', 5); f.rotWave('lowLeft', 5); yield 3; f.turrets(2); f.rotWave('kami', 5); yield 2; yield f.clear();
+  f.turrets(3); yield 2.5; f.rotWave('left', 4); yield 2; f.rotWave('right', 4); yield 2; f.rotWave('kami', 4); yield 3; yield f.clear();
+  }
+  f.checkpoint('boss');
   if (f.ship.mega >= 1) f.say('gazou', 'Pleine, ta jauge est. Le Méga-Prout 💨, garde-le pour la ventouse !', 4);
   yield 2;
   f.say('pqr', 'Une ventouse ! Une ÉNORME ventouse ! Elle va nous déboucher !', 3.5);
@@ -208,6 +209,7 @@ export const MISSIONS = [
 // ---------- mission 2 : les marais de Gazouland ----------
 export function* footMarais(g) {
   const hud = g.ctx.hud;
+  if (g.from !== 'burpo') {
   hud.objective('Entraîne-toi avec Maître Gazou');
   yield 1;
   g.say('gazou', 'Un saut de chevalier, fais. Touche 🌀 !', 4);
@@ -227,6 +229,8 @@ export function* footMarais(g) {
   yield g.clear();
   g.dropGroup(['gros', 'ventouse', 'tireur', 'tireur'], null, 8);
   yield 2; yield g.clear();
+  }
+  g.checkpoint('burpo');
   yield 1;
   g.ctx.music('duel');
   hud.banner('LE CAPITAINE BURPO !', 2.5);
@@ -249,6 +253,7 @@ export function* speederRace(sp) {
   const hud = sp.ctx.hud;
   hud.objective('Rattrape les motojets !');
   yield 3;
+  if (sp.from !== 'bolide') {
   sp.motoWave(2, true); yield 6;
   sp.motoWave(2, false); yield 2; yield sp.clear();
   sp.say('pqr', 'Plus vite, Lucas ! Ils emportent R2-WC !', 3);
@@ -258,6 +263,8 @@ export function* speederRace(sp) {
   sp.motoWave(4, true); yield 5; sp.motoWave(3, false); yield 2; yield sp.clear();
   sp.treeGap = 7;
   sp.motoWave(3, false); yield 3; sp.motoWave(3, true); yield 2; yield sp.clear();
+  }
+  sp.checkpoint('bolide');
   sp.treeGap = 12;
   yield 1.5;
   hud.banner('LE GROS BOLIDE !', 2.5);
@@ -296,7 +303,7 @@ export function* footNuages(g) {
   hud.pointer(null);
   g.freePrison();
   g.say('hanpopo', 'La bulle a éclaté ! Des soldats arrivent… Couvre-moi, gamin !', 3.5);
-  hud.objective('Protège Han Popo !');
+  hud.objective('Chasse les gardes de Han Popo !');
   g.dropGroup(['gros', 'tireur', 'ventouse', 'tireur'], P.pos, 7);
   yield 2; yield g.clear();
   g.say('hanpopo', 'Bien joué ! Viens me chercher, on file !', 3);

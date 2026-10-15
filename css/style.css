@@ -374,3 +374,50 @@ body.phone #game.narrow #radio:not(.hidden) ~ #bossbar { top: 214px; }
 #game.wide #atelier { flex-direction: row; align-items: center; justify-content: flex-end; padding: 8px 12px; }
 #game.wide #atelier h2 { display: none; }
 #game.wide #atelier .panel { max-width: 54%; }
+
+/* ---- finitions (octobre 2026) ---- */
+/* téléphones à encoche : rien sous la caméra ni sous les coins arrondis */
+#hud { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+#controls { right: max(14px, env(safe-area-inset-right)); }
+#vs { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+/* téléphone couché : la radio plus petite ; en vol, elle descend en bas à gauche (les ennemis arrivent par le haut) */
+#game.wide #radio { max-width: 440px; padding: 4px 10px 4px 4px; top: 56px; }
+#game.wide #radio .face { width: 44px; height: 44px; }
+#game.wide #radio p { font-size: 13px; }
+#game.wide #hud.flight #radio { top: auto; bottom: 12px; max-width: 46%; }
+#game.wide #hud.flight #radio:not(.hidden) ~ #bossbar { top: 60px; }
+/* un léger vignettage de cinéma sur les bords */
+#vignette { position: absolute; inset: 0; pointer-events: none; z-index: 1; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 62%, rgba(10,4,20,.28) 100%); }
+/* coup reçu : bords rouges */
+#hurtFx { position: absolute; inset: 0; pointer-events: none; z-index: 11; opacity: 0; transition: opacity .45s; box-shadow: inset 0 0 70px 18px rgba(255,40,40,.75); }
+#hurtFx.on { opacity: 1; transition: none; }
+#hearts.low { animation: beat .8s infinite; }
+@keyframes beat { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.18); } 30% { transform: scale(1); } }
+/* écran des missions : la prochaine mission à jouer */
+.card { position: relative; }
+.card.next { animation: nextPulse 1.2s ease-in-out infinite; border-color: #2f7a2a; }
+.nextTag { position: absolute; top: -12px; right: -8px; background: var(--green2, #6bd23a); color: var(--ink); border: 3px solid var(--ink); border-radius: 12px; padding: 2px 8px; font-size: 14px; box-shadow: 0 3px 0 var(--ink); }
+@keyframes nextPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+/* fin de mission */
+.starRule { font-size: 13px; opacity: .85; }
+.unlock { background: #fff7e0; color: var(--ink); border: 4px solid var(--ink); border-radius: 16px; padding: 8px 12px; font-family: system-ui, sans-serif; font-weight: 700; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; box-shadow: 0 4px 0 var(--ink); animation: pop .35s ease-out; }
+.btn.small { font-size: 15px; padding: 6px 12px; }
+/* téléphone couché : les missions sur une seule ligne qui défile, toutes visibles d'un coup d'œil */
+#game.wide .screen h2 { font-size: clamp(24px, 7vh, 34px); }
+#game.wide .vueBtn { font-size: 14px; padding: 5px 12px; }
+#game.wide .cards { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; max-width: 100%; padding: 14px 8px 8px; gap: 10px; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
+#game.wide .card { flex: none; width: 168px; padding: 8px; gap: 3px; scroll-snap-align: center; }
+#game.wide .card img { height: 72px; }
+#game.wide .card b { font-size: 15px; }
+#game.wide .card p { font-size: 11px; }
+#game.wide .card .stars { font-size: 16px; }
+#game.wide .cards { overflow-y: hidden; flex: none; }
+#game.wide .card p { display: none; }
+#game.wide .card b { min-height: 2.4em; display: flex; align-items: center; justify-content: center; }
+#game.wide .screen { gap: 8px; padding: 10px 16px; }
+/* téléphone couché : fins de mission compactes, les boutons toujours visibles */
+#game.wide .bigstars { font-size: 34px; letter-spacing: 3px; }
+#game.wide .screen .portrait { height: 74px; width: auto; }
+#game.wide .starRule { display: none; }
+#game.wide .unlock { padding: 4px 10px; font-size: 13px; }
+#game.wide .screen .btn { font-size: 17px; padding: 8px 16px; }

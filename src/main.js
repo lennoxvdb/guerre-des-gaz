@@ -1,6 +1,6 @@
 // La Guerre des Gaz : démarrage, écrans, commandes, caméra, enchaînement des missions.
 import * as THREE from 'three';
-import { loadTextures, TEX, Particles, puffTex, glowTex, Words } from './engine/gfx.js';
+import { loadTextures, TEX, Particles, puffTex, glowTex, Words, autoDispose } from './engine/gfx.js';
 import { unlock, sfx, playMusic, muted, setMuted, setSaberVoice } from './engine/audio.js';
 import { loadKnight, Fighter, SaberTrail } from './entities/fighter.js';
 import { World } from './world/world.js';
@@ -27,10 +27,41 @@ const persist = () => { try { localStorage.setItem('gdg_save', JSON.stringify(sa
 // ---------------- 3D ----------------
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const touchPhone = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) || touchDevice;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = touchPhone ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap; // ombres douces moins chères sur téléphone
 const scene = new THREE.Scene();
+// on libère la carte graphique de tout ce qu'on enlève de la scène (tirs, soldats, décor) : sinon le jeu ralentit au fil des parties
+autoDispose(scene);
+
+// qualité qui s'adapte toute seule : si le téléphone rame, on dessine moins de pixels, puis des ombres plus simples ;
+// s'il est à l'aise, on remonte. But : toujours fluide.
+const Q = { max: Math.min(window.devicePixelRatio || 1, 2), min: Math.min(window.devicePixelRatio || 1, 1), acc: 0, n: 0, calm: 0, slow: 0, lowShadow: false };
+Q.pr = touchPhone ? Math.min(Q.max, 1.5) : Q.max;
+renderer.setPixelRatio(Q.pr);
+const fpsEl = new URLSearchParams(location.search).has('fps') ? document.body.appendChild(Object.assign(document.createElement('div'), { style: 'position:fixed;left:4px;bottom:4px;z-index:99;color:#8fff5a;font:12px monospace;background:#0008;padding:2px 5px;pointer-events:none' })) : null;
+function lowerShadows() {
+  Q.lowShadow = true;
+  if (world && world.sun && world.sun.shadow.mapSize.x > 1024) {
+    world.sun.shadow.mapSize.set(1024, 1024);
+    if (world.sun.shadow.map) { world.sun.shadow.map.dispose(); world.sun.shadow.map = null; }
+  }
+}
+function adaptQuality(real) {
+  if (document.hidden) { Q.acc = 0; Q.n = 0; return; }
+  Q.acc += real; Q.n++;
+  if (Q.acc < 1.5) return;
+  const fps = Q.n / Q.acc; Q.acc = 0; Q.n = 0;
+  if (fpsEl) fpsEl.textContent = `${Math.round(fps)} i/s · ${Q.pr.toFixed(2)}x${Q.lowShadow ? ' · ombres simples' : ''} · ${renderer.info.render.calls} dessins`;
+  if (fps < 47) {
+    Q.calm = 0;
+    if (Q.pr > Q.min + 0.01) { Q.pr = Math.max(Q.min, Q.pr - 0.25); renderer.setPixelRatio(Q.pr); resize(); }
+    else if (!Q.lowShadow && ++Q.slow >= 2) lowerShadows();
+  } else if (fps > 57) {
+    Q.slow = 0;
+    if (++Q.calm >= 4 && Q.pr < Q.max - 0.01) { Q.pr = Math.min(Q.max, Q.pr + 0.25); renderer.setPixelRatio(Q.pr); resize(); Q.calm = 0; }
+  } else { Q.calm = 0; Q.slow = 0; }
+}
 const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 300);
 const puffs = new Particles(scene, puffTex, 900);
 const glows = new Particles(scene, glowTex, 600); // pas « additif » : les lueurs gardent leur couleur sur le sable
@@ -80,11 +111,13 @@ let shakeAmt = 0, stopT = 0, zoomNow = 1;
 const aspect = () => GW / GH;
 const footHalf = () => Math.max(7.4, 5.4 / aspect());
 const flightHalf = () => Math.max(9.5, 6.3 / aspect());
+const _off = new THREE.Vector3(), _offF = new THREE.Vector3(), _shk = new THREE.Vector3();
+const shakeVec = (k) => _shk.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(shakeAmt * k);
 function placeCamera(dt) {
   zoomNow += (cam.zoom - zoomNow) * Math.min(1, dt * 3);
-  const off = OFF_FOOT.clone().normalize().lerp(FLIGHT_OFF.clone().normalize(), cam.elev).normalize().multiplyScalar(80);
+  const off = _off.copy(OFF_FOOT).normalize().lerp(_offF.copy(FLIGHT_OFF).normalize(), cam.elev).normalize().multiplyScalar(80);
   camera.position.copy(cam.target).add(off);
-  if (shakeAmt > 0) camera.position.add(new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5)).multiplyScalar(shakeAmt * 0.9));
+  if (shakeAmt > 0) camera.position.add(shakeVec(0.9));
   camera.lookAt(cam.target);
   const half = (footHalf() + (flightHalf() - footHalf()) * cam.elev) * zoomNow, a = aspect();
   camera.left = -half * a; camera.right = half * a; camera.top = half; camera.bottom = -half;
@@ -103,7 +136,7 @@ addEventListener('keydown', (e) => {
   if (KEYS.mega.includes(e.code)) input.mega = true;
   if (KEYS.action.includes(e.code)) input.action = true;
   if (KEYS.jump.includes(e.code)) input.jump = true;
-  if ((e.code === 'Escape' || e.code === 'KeyP') && state === 'play') pause();
+  if ((e.code === 'Escape' || e.code === 'KeyP') && state === 'play') { if (paused) { paused = false; noScreen(); } else pause(); }
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
@@ -228,7 +261,14 @@ const TIPS = {
 };
 const BTN = { atk: 'btnAtk', block: 'btnBlock', mega: 'btnMega', jump: 'btnJump' };
 const hud = {
-  hearts(hp, max) { $('hearts').innerHTML = Array.from({ length: max }, (_, i) => `<span class="${i < hp ? '' : 'off'}">❤️</span>`).join(''); },
+  hearts(hp, max) {
+    const el = $('hearts');
+    // un cœur perdu : bords rouges ; plus que 1 ou 2 cœurs : ils battent
+    if (hud.lastHp !== undefined && hp < hud.lastHp && state === 'play') ctx.hurt();
+    hud.lastHp = hp;
+    el.innerHTML = Array.from({ length: max }, (_, i) => `<span class="${i < hp ? '' : 'off'}">❤️</span>`).join('');
+    el.classList.toggle('low', hp > 0 && hp <= 2);
+  },
   mega(k) { $('megaFill').style.height = Math.round(Math.min(1, k) * 100) + '%'; $('btnMega').classList.toggle('full', k >= 1); },
   objective(t) { $('objective').textContent = t || ''; },
   radio(who, text, dur = 3.6) {
@@ -253,6 +293,7 @@ const hud = {
   pointer(p) { pointerTarget = p ? p.clone() : null; },
 };
 function resetHud() {
+  hud.lastHp = undefined;
   hud.objective(''); hud.boss(null); hud.tip(null); hud.action(null); hud.pointer(null);
   $('radio').classList.add('hidden'); $('banner').classList.add('hidden'); radioT = bannerT = 0;
 }
@@ -264,6 +305,7 @@ const ctx = {
   shake(a) { shakeAmt = Math.max(shakeAmt, a); },
   hitstop(t) { stopT = Math.max(stopT, t); },
   flash(a) { flash(a); },
+  hurt() { const h = $('hurtFx'); h.classList.add('on'); void h.offsetWidth; requestAnimationFrame(() => h.classList.remove('on')); },
   music(name) { playMusic(name); },
   aspect, flightHalf, gw: () => GW,
   dragScale: () => (camera.right - camera.left) / GW * 1.35,
@@ -307,6 +349,7 @@ function clearScene() {
 function setWorld(theme) {
   world = new World(scene, theme);
   ctx.world = world;
+  if (Q.lowShadow) lowerShadows();
 }
 
 let gameVersion = '';
@@ -320,6 +363,7 @@ function title() {
   state = 'title'; paused = false;
   $('hud').classList.add('hidden');
   setWorld('sablon');
+  if (world.friends && world.friends.gazou) world.friends.gazou.visible = false; // il serait collé à la caméra (grand chapeau coupé en bas)
   titleHero = new Fighter('lucas', 2.0);
   titleHero.yaw = 0; // face à nous
   scene.add(titleHero.root);
@@ -412,10 +456,11 @@ function atelier() {
 
 function missionsScreen() {
   state = 'menu';
+  const nextM = MISSIONS.find((m) => !m.soon && !(save.stars[m.id] > 0));
   const cards = MISSIONS.map((m) => {
     const st = save.stars[m.id] || 0;
     const img = m.icon;
-    return `<button class="card ${m.soon ? 'soon' : ''}" data-id="${m.id}">
+    return `<button class="card ${m.soon ? 'soon' : ''} ${m === nextM ? 'next' : ''}" data-id="${m.id}">${m === nextM ? '<span class="nextTag">▶ À toi !</span>' : ''}
       <img src="${img}" alt=""><b>${m.id}. ${m.name}</b><p>${m.desc}</p>
       <div class="stars">${m.soon ? 'Bientôt' : [1, 2, 3].map((i) => (i <= st ? '⭐' : '☆')).join('')}</div></button>`;
   }).join('');
@@ -424,6 +469,8 @@ function missionsScreen() {
     <button class="btn alt vueBtn" id="vueBtn">🎥 Vue : ${cine ? 'derrière Lucas (cinéma)' : 'du dessus'}</button>
     <div class="cards">${cards}</div><button class="btn grey" id="backBtn">◀ Retour</button>`, 'dim');
   $('vueBtn').onclick = () => { sfx.click(); save.vue = cine ? 'dessus' : 'cinema'; persist(); missionsScreen(); };
+  const nx = document.querySelector('.card.next');
+  if (nx) nx.scrollIntoView({ inline: 'center', block: 'nearest' });
   document.querySelectorAll('.card').forEach((c) => c.addEventListener('click', () => {
     const m = MISSIONS.find((x) => x.id === Number(c.dataset.id));
     if (m.soon) return;
@@ -469,7 +516,7 @@ function startMission(m, opts = {}) {
   cam.target.copy(start).setY(1);
   world.follow(start);
   $('hud').classList.add('hidden');
-  const go = () => { noScreen(); startPart(part, { retry: !!opts.retry || part !== m.parts[0] }); };
+  const go = () => { noScreen(); startPart(part, { retry: !!opts.retry || part !== m.parts[0], from: opts.from }); };
   if (opts.retry) go();
   else { playMusic('menu'); story(m.intro, go); }
 }
@@ -485,17 +532,18 @@ function startPart(part, carry = {}) {
   const m = mission;
   if (part === 'foot') {
     const F = m.foot;
-    mode = new FootMode(ctx, { script: F.script, heroPos: new THREE.Vector3(...F.start), radius: F.radius, jet: F.jet, indoor: F.indoor, cinema: save.vue === 'cinema' });
+    $('flightHelp').classList.add('hidden');
+    mode = new FootMode(ctx, { script: F.script, heroPos: new THREE.Vector3(...F.start), radius: F.radius, jet: F.jet, indoor: F.indoor, cinema: save.vue === 'cinema', from: carry.from });
     playMusic(F.music || 'foot');
   } else if (part === 'flight') {
     if (world.wc) world.wc.visible = false;
     hud.classList.add('flight');
     $('flightHelp').classList.toggle('hidden', !touchDevice);
     const startPos = carry.startPos || (world.wcSpot ? world.wcSpot.clone() : new THREE.Vector3());
-    mode = new FlightMode(ctx, { script: m.flight.script, startPos, hp: carry.hp ?? DIFF.hp, mega: carry.mega ?? 0, skipIntro: carry.retry || !world.wcSpot, chase: save.vue === 'cinema' });
+    mode = new FlightMode(ctx, { script: m.flight.script, startPos, hp: carry.hp ?? DIFF.hp, mega: carry.mega ?? 0, skipIntro: carry.retry || !world.wcSpot, chase: save.vue === 'cinema', from: carry.from });
     playMusic('flight');
   } else if (part === 'versus') {
-    mode = new VersusMode(ctx, {});
+    mode = new VersusMode(ctx, { easy: (save.fails || {})[mission.id] || 0 });
     playMusic('duel');
   } else if (part === 'trench') {
     hud.classList.add('flight');
@@ -505,9 +553,11 @@ function startPart(part, carry = {}) {
   } else if (part === 'speeder') {
     hud.classList.add('flight', 'speeder');
     $('flightHelp').classList.toggle('hidden', !touchDevice);
-    mode = new SpeederMode(ctx, { script: m.speeder.script, hp: carry.hp ?? DIFF.hp });
+    mode = new SpeederMode(ctx, { script: m.speeder.script, hp: carry.hp ?? DIFF.hp, from: carry.from });
     playMusic(m.speeder.music || 'flight');
   }
+  // dans l'espace et dans la tranchée, les ombres du soleil ne servent à rien : on ne les calcule pas (plus fluide)
+  if (world && world.sun) world.sun.castShadow = !(part === 'trench' || part === 'versus' || world.space);
 }
 
 function onResult(r) {
@@ -528,8 +578,14 @@ function onResult(r) {
 function win() {
   const hp = mode.hero ? mode.hero.hp : mode.ship ? mode.ship.hp : mode.player.hp;
   const stars = hp >= DIFF.hp * 0.66 ? 3 : hp >= DIFF.hp * 0.33 ? 2 : 1;
+  const wonBefore = wonCount();
+  if (save.fails) delete save.fails[mission.id];
   save.stars[mission.id] = Math.max(save.stars[mission.id] || 0, stars);
   persist();
+  // les pièces du sabre gagnées avec cette mission
+  const wonAfter = wonCount();
+  const gained = [];
+  if (wonAfter > wonBefore) for (const k of Object.keys(SABRE)) for (const x of SABRE[k]) if (x.need > wonBefore && x.need <= wonAfter) gained.push(x);
   state = 'outro';
   $('hud').classList.add('hidden');
   playMusic('win'); sfx.win();
@@ -539,11 +595,14 @@ function win() {
     const next = duel ? null : MISSIONS.find((x) => x.id === mission.id + 1 && !x.soon);
     screen(`<h2>Mission réussie !</h2>
       <div class="bigstars">${[1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('')}</div>
+      <p class="sub starRule">⭐⭐⭐ = finir avec beaucoup de cœurs</p>
       <img class="portrait" src="assets/persos/lucas_rire.webp" alt="">
+      ${gained.length ? `<div class="unlock">🎁 Nouveau pour ton sabre : <b>${gained.map((x) => (x.ico ? x.ico + ' ' : '') + x.nom).join(', ')}</b> <button class="btn alt small" id="forgeBtn">🔧 Essayer</button></div>` : ''}
       <div class="row">${next ? '<button class="btn" id="nextBtn">Mission suivante ▶</button>' : ''}${duel ? '<button class="btn" id="againBtn">🥊 Revanche</button>' : ''}<button class="btn alt" id="menuBtn">${duel ? 'Accueil' : 'Missions'}</button></div>
       ${mission.id === 6 ? '<p class="sub">Bravo ! Tu as sauvé toute la galaxie. Que le Gaz soit avec toi !</p>' : ''}`, 'dim');
     if (duel) $('againBtn').onclick = () => { sfx.click(); startMission(DUEL, { retry: true }); };
     if (next) $('nextBtn').onclick = () => { sfx.click(); startMission(next); };
+    if (gained.length) $('forgeBtn').onclick = () => { sfx.click(); clearScene(); title(); atelier(); };
     $('menuBtn').onclick = () => { sfx.click(); clearScene(); title(); if (!duel) missionsScreen(); };
   });
 }
@@ -551,14 +610,16 @@ function win() {
 function gameOver() {
   state = 'over';
   const failedPart = modeName;
-  const inFlight = modeName !== 'foot';
+  const cp = mode && mode.cp; // point de reprise : on recommence directement au boss
+  save.fails = save.fails || {}; save.fails[mission.id] = (save.fails[mission.id] || 0) + 1; persist(); // le jeu s'adoucit un peu après chaque défaite
+  const inFlight = modeName === 'flight' || modeName === 'trench';
   $('hud').classList.add('hidden');
   playMusic(null);
   screen(`<h2>Lucas est K.O. !</h2>
     <img class="portrait" src="assets/persos/roteur.webp" alt="">
     <p class="sub">Dark Roteur rigole… mais le Gaz est encore avec toi !</p>
-    <div class="row"><button class="btn" id="retryBtn">${failedPart === 'versus' ? '🥊 Revanche' : inFlight ? 'Recommencer le vol' : 'Réessayer'}</button><button class="btn grey" id="menuBtn">Missions</button></div>`, 'dim');
-  $('retryBtn').onclick = () => { sfx.click(); startMission(mission, { retry: true, part: failedPart }); };
+    <div class="row"><button class="btn" id="retryBtn">${failedPart === 'versus' ? '🥊 Revanche' : cp ? '↻ Réessayer contre le boss' : inFlight ? 'Recommencer le vol' : 'Réessayer'}</button><button class="btn grey" id="menuBtn">Missions</button></div>`, 'dim');
+  $('retryBtn').onclick = () => { sfx.click(); startMission(mission, { retry: true, part: failedPart, from: cp }); };
   $('menuBtn').onclick = () => { sfx.click(); clearScene(); title(); missionsScreen(); };
 }
 
@@ -627,8 +688,11 @@ function frame(now) {
     ptr.classList.remove('hidden');
   } else ptr.classList.add('hidden');
 
-  // la tranchée et l'écran titre ont leur caméra de cinéma
-  renderer.render(scene, viewCam());
+  // la tranchée et l'écran titre ont leur caméra de cinéma (les vues derrière le héros tremblent aussi)
+  const vc = viewCam();
+  if (shakeAmt > 0 && vc !== camera && vc !== titleCam) vc.position.add(shakeVec(0.35));
+  renderer.render(scene, vc);
+  adaptQuality(real);
   requestAnimationFrame(frame);
 }
 
@@ -679,4 +743,4 @@ function simulate(sec) {
     if (r) onResult(r);
   }
 }
-window.gdg = { get mode() { return mode; }, get state() { return state; }, input, ctx, simulate };
+window.gdg = { get mode() { return mode; }, get state() { return state; }, input, ctx, simulate, renderer, scene, start: (n, o = {}) => startMission(n === 0 ? DUEL : MISSIONS[n - 1], { retry: true, ...o }), gameOver: () => gameOver() };

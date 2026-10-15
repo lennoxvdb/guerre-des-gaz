@@ -7,7 +7,12 @@ import { sfx } from '../engine/audio.js';
 import { SR, SU, rand, clamp, pick, wrapA, yawOf, dist2, HIT_WORDS, Script } from './common.js';
 
 const V = () => new THREE.Vector3();
-const _a = V(), _b = V(), _c = V();
+const _a = V(), _b = V(), _c = V(), _p = V();
+// la bulle des soldats qui tombent du ciel : une seule forme pour tous
+const BUB_GEO = new THREE.SphereGeometry(1.6, 20, 14), RIM_GEO = new THREE.SphereGeometry(1.62, 20, 14);
+BUB_GEO.userData.keep = RIM_GEO.userData.keep = true;
+const BUB_MAT = new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.28, depthWrite: false });
+const RIM_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, side: THREE.BackSide, depthWrite: false });
 
 export class FootMode {
   constructor(ctx, opts) {
@@ -18,6 +23,8 @@ export class FootMode {
     this.t = 0;
     this.enemies = []; this.bolts = []; this.strafes = []; this.pickups = []; this.fx = [];
     this.result = null;
+    this.from = opts.from || null; this.cp = null; // point de reprise (on recommence au boss si on perd contre lui)
+    this.revived = false; this.killT = 0; this.kills = 0;
     this.megaName = opts.megaName || 'MÉGA-PROUT';
     // mission au jetpack : tout le monde vole à cette hauteur, on survole ce qui est bas
     this.jet = !!opts.jet;
@@ -67,6 +74,12 @@ export class FootMode {
 
   // ---------- aides pour les scénarios ----------
   say(who, text, dur) { this.ctx.hud.radio(who, text, dur); }
+  checkpoint(name) { this.cp = name; }
+  // ce point est-il sur l'écran ? (un soldat ne tire pas depuis l'extérieur de l'écran)
+  onScreen(p) {
+    _p.copy(p).setY(1).project(this.cam3 || this.ctx.camera);
+    return Math.abs(_p.x) < 0.92 && Math.abs(_p.y) < 0.9 && _p.z < 1;
+  }
   get alive() { return this.enemies.filter((e) => !e.dead && e.kind !== 'gen').length; }
   get gensLeft() { return this.enemies.filter((e) => !e.dead && e.kind === 'gen').length; }
   clear() { return () => this.alive === 0 && !this.strafes.some((s) => s.drops); }
@@ -75,10 +88,8 @@ export class FootMode {
   drop(kind, x, z, delay = 0) {
     const e = this.makeSoldier(kind, x, z);
     e.state = 'drop'; e.y = 14 + delay * 7; e.t = 0;
-    const bub = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 14),
-      new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.28, depthWrite: false }));
-    const rim = new THREE.Mesh(new THREE.SphereGeometry(1.62, 20, 14),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, side: THREE.BackSide, depthWrite: false }));
+    const bub = new THREE.Mesh(BUB_GEO, BUB_MAT);
+    const rim = new THREE.Mesh(RIM_GEO, RIM_MAT);
     bub.add(rim); bub.position.y = 1.2;
     e.f.root.add(bub); e.bubble = bub;
     e.shadow = shadowBlob(1.6); e.shadow.position.set(x, 0.04, z); this.scene.add(e.shadow);
@@ -128,7 +139,7 @@ export class FootMode {
     ring.position.y = 3.2; g.add(ring);
     g.position.set(x, 0, z);
     this.scene.add(g);
-    const e = { kind: 'gen', g, ring, mat: base.material, pos: new THREE.Vector3(x, 0, z), knock: V(), hp: 24, maxHp: 24, r: 1.3, dead: false, state: 'idle', t: 0, flash: 0 };
+    const e = { kind: 'gen', g, ring, mat: base.material, pos: new THREE.Vector3(x, 0, z), knock: V(), hp: 14, maxHp: 14, r: 1.3, dead: false, state: 'idle', t: 0, flash: 0 };
     this.world.obstacles.push(e.obst = { x, z, r: 1.3, h: 9 });
     this.enemies.push(e);
     return e;
@@ -377,13 +388,15 @@ export class FootMode {
       return;
     }
     // Dark Roteur pare les coups de face quand il est en garde
-    if (e.kind === 'roteur' && e.state === 'stalk' && Math.random() < 0.55) {
+    if (e.kind === 'roteur' && e.state === 'stalk' && (e.blocks || 0) < 2 && Math.random() < 0.4) {
+      e.blocks = (e.blocks || 0) + 1; // jamais plus de 2 parades de suite : le 3e coup passe
       this.clash(e.pos.clone().lerp(this.hero.pos, 0.5));
       e.f.play('blockHit', 1.4);
       this.hero.knock.addScaledVector(dir, -5);
       return;
     }
     e.hp -= n;
+    e.blocks = 0;
     e.f.flash = 1;
     e.knock.addScaledVector(dir, e.kind === 'roteur' ? knock * 0.3 : e.big ? knock * 0.4 : knock);
     const p = e.pos.clone().setY(2.2);
@@ -408,6 +421,11 @@ export class FootMode {
     if (e.kind === 'gen') return this.destroyGen(e);
     e.dead = true; e.state = 'dead'; e.t = 0;
     e.f.play('death', 1.3);
+    this.ctx.hitstop(0.09); this.ctx.shake(0.22);
+    // plusieurs soldats coup sur coup : COMBO !
+    this.kills = this.t - this.killT < 1.8 ? this.kills + 1 : 1;
+    this.killT = this.t;
+    if (this.kills >= 2) this.ctx.words.pop('×' + this.kills + ' COMBO !', this.hero.pos.clone().setY(3.6), '#ffd23f', 1.2 + Math.min(this.kills, 5) * 0.15);
     if (Math.random() < 0.5) this.spawnPickup(e.pos, Math.random() < 0.6 ? 'heal' : 'mega');
   }
 
@@ -425,9 +443,19 @@ export class FootMode {
     h.f.flash = 1; h.f.play('hit', 1.4);
     if (from) h.knock.add(_a.copy(h.pos).sub(from).setY(0).normalize().multiplyScalar(7));
     sfx.hurt();
-    this.ctx.shake(0.45);
+    this.ctx.shake(0.45); this.ctx.hitstop(0.07);
     this.ctx.puffs.burst(h.pos.x, 1.2, h.pos.z, 0xc38be8, 10, 3, { life: 0.8 });
     this.ctx.hud.hearts(Math.max(0, h.hp), h.maxHp);
+    if (h.hp <= 0 && !this.revived) { // une deuxième chance, une seule fois : Maître Gazou remplit les cœurs et Lucas lâche un Méga-Prout
+      this.revived = true;
+      h.hp = h.maxHp; this.ctx.hud.hearts(h.hp, h.maxHp);
+      this.ctx.words.pop('2e CHANCE !', h.pos.clone().setY(4), '#8fff5a', 2.2);
+      this.say('gazou', 'Abandonner, jamais ! Le Gaz, une deuxième chance te donne.', 3.5);
+      sfx.heal();
+      this.megaProut();
+      h.inv = 3;
+      return;
+    }
     if (h.hp <= 0) { h.dead = true; h.deadT = 0; h.f.play('death', 1); h.f.setSaberOn(0); }
   }
 
@@ -447,7 +475,9 @@ export class FootMode {
       if (e.dead || e.state === 'drop') continue;
       const d = dist2(e.pos, h.pos);
       if (d < 7.5) {
-        if (e.kind === 'roteur') { e.state = 'stunned'; e.t = 0; e.hp -= 2; e.f.flash = 1; this.ctx.hud.boss(e.name, Math.max(0, e.hp / e.maxHp)); if (e.hp <= 0) this.defeatRoteur(e); }
+        if (e.kind === 'roteur') {
+          if (e.thrown) { this.scene.remove(e.thrown.s); e.thrown = null; e.f.saber.visible = true; } // son sabre lancé revient dans sa main
+          e.state = 'stunned'; e.t = 0; e.hp -= 2; e.f.flash = 1; this.ctx.hud.boss(e.name, Math.max(0, e.hp / e.maxHp)); if (e.hp <= 0) this.defeatRoteur(e); }
         else this.damage(e, 5, _a.copy(e.pos).sub(h.pos).normalize(), 14);
       }
     }
@@ -500,6 +530,8 @@ export class FootMode {
     if (h.target && (h.target.dead || h.target.state === 'drop')) h.target = null;
     if (!h.target && !h.moveTo && mag < 0.15 && !inp.block) {
       for (const e of this.enemies) if (!e.dead && e.kind !== 'roteur' && e.kind !== 'gen' && e.state !== 'drop' && dist2(e.pos, h.pos) < 2.3 + e.r) { h.target = e; break; }
+      // un générateur juste à côté et pas de soldat : Lucas le frappe tout seul
+      if (!h.target) for (const e of this.enemies) if (!e.dead && e.kind === 'gen' && dist2(e.pos, h.pos) < 2.4 + e.r) { h.target = e; break; }
     }
     let autoAtk = false;
     if (h.target) {
@@ -513,7 +545,9 @@ export class FootMode {
       else { mv.set(dx / d, 0, dz / d); mag = Math.min(1, d * 1.5); mv.multiplyScalar(mag); }
     }
     const wantAtk = inp.attack || autoAtk;
-    if (inp.jump && h.jumpCool <= 0 && h.special <= 0 && !h.cheer) { this.startJump(mag > 0.15 ? mv : null); return; }
+    if (inp.jump) h.jumpBuf = 0.3; // un saut demandé un peu trop tôt n'est pas perdu
+    h.jumpBuf = (h.jumpBuf || 0) - dt;
+    if (h.jumpBuf > 0 && h.jumpCool <= 0 && h.special <= 0 && !h.cheer) { h.jumpBuf = 0; this.startJump(mag > 0.15 ? mv : null); return; }
     h.blocking = inp.block && h.atkT <= 0 && h.special <= 0 && !h.cheer;
     f.guard = h.blocking; // le sabre bien droit devant lui
     let speed = this.jet ? 8.5 : 6.8;
@@ -583,6 +617,7 @@ export class FootMode {
   updateSoldier(e, dt) {
     const h = this.hero, f = e.f;
     e.t += dt;
+    if (e.warnD && e.state !== 'windup') { this.scene.remove(e.warnD); e.warnD = null; }
     if (e.state === 'drop') {
       e.y -= dt * 7;
       f.root.position.set(e.pos.x, Math.max(this.lift, e.y), e.pos.z);
@@ -638,13 +673,19 @@ export class FootMode {
         else vel.set(-toH.z * e.side, 0, toH.x * e.side).multiplyScalar(1.6);
         if (Math.random() < dt * 0.3) e.side *= -1;
         f.setBase(this.jet ? 'fly' : vel.lengthSq() > 0.1 ? 'run' : 'idle', 0.7);
-        if (e.cool <= 0 && d < 14 && !this.busyShooters()) { e.state = 'aim'; e.t = 0; }
+        if (e.cool <= 0 && d < 14 && !this.busyShooters() && this.onScreen(e.pos)) { e.state = 'aim'; e.t = 0; }
       }
       f.turnTo(yawOf(toH.x, toH.z), dt, 8);
     } else { // ventouse : il fonce et tape
       if (e.state === 'windup') {
         f.turnTo(yawOf(toH.x, toH.z), dt, 4);
+        if (e.big) { // le gros soldat : un cercle rouge au sol là où il va taper
+          if (!e.warnD) { e.warnD = warnDisc(4.6); this.scene.add(e.warnD); }
+          e.warnD.position.set(e.pos.x + toH.x * 1.6, 0.06 + this.lift, e.pos.z + toH.z * 1.6);
+          e.warnD.material.opacity = 0.5 + 0.4 * Math.sin(e.t * 22);
+        }
         if (e.t > D.windup) {
+          if (e.warnD) { this.scene.remove(e.warnD); e.warnD = null; }
           e.state = 'strike'; e.t = 0;
           f.play('atk3', 1.6, 0.8);
           sfx.swing(0.7, 'classique');
@@ -731,9 +772,9 @@ export class FootMode {
       case 'windup': { // il lève son sabre : le sol devient rouge devant lui
         f.turnTo(yawOf(toH.x, toH.z), dt, 5);
         arcOn = Math.min(1, e.t / wind);
-        if (e.t === dt || e.t < dt * 1.5) f.play(['atk1', 'atk2', 'heavy'][e.combo], 0.35, 0.5);
+        if (!e.windAnim) { e.windAnim = true; f.play(['atk1', 'atk2', 'heavy'][e.combo], 0.35, 0.5); }
         if (e.t > wind) {
-          e.state = 'strike'; e.t = 0;
+          e.state = 'strike'; e.t = 0; e.windAnim = false;
           f.play(['atk1', 'atk2', 'heavy'][e.combo], 1.6, 0.85);
           sfx.swing(0.6, 'classique');
           e.knock.addScaledVector(toH, 6);
@@ -746,7 +787,8 @@ export class FootMode {
           const ang = Math.abs(wrapA(yawOf(toH.x, toH.z) - f.yaw));
           if (d < 3.6 && ang < 0.9) {
             const facing = this.heroFacing();
-            const guard = h.blocking && (facing.x * -toH.x + facing.z * -toH.z) > -0.3;
+            const dot = facing.x * -toH.x + facing.z * -toH.z;
+            const guard = (h.blocking && dot > -0.3) || (h.atkT > 0 && dot > 0.3); // les deux sabres se cognent : ça compte comme une parade
             if (guard) { this.clash(e.pos.clone().lerp(h.pos, 0.6)); h.f.play('blockHit', 1.3); h.knock.addScaledVector(toH, 5); e.parried++; }
             else this.hurtHero(1, e.pos);
           }
@@ -952,6 +994,7 @@ export class FootMode {
         this.ctx.hud.hearts(h.hp, h.maxHp); this.ctx.hud.mega(h.mega);
         this.scene.remove(p.g); return false;
       }
+      if (p.t > 10) p.g.visible = Math.floor(p.t * 8) % 2 === 0; // il clignote : il va disparaître
       if (p.t > 14) { this.scene.remove(p.g); return false; }
       return true;
     });
@@ -992,7 +1035,7 @@ export class FootMode {
 
   dispose() {
     if (this.cam3) this.scene.fog = this.oldFog || null;
-    for (const e of this.enemies) { if (e.g) this.scene.remove(e.g); if (e.f) this.scene.remove(e.f.root); if (e.arc) this.scene.remove(e.arc); if (e.trail) e.trail.dispose(this.scene); if (e.shadow) this.scene.remove(e.shadow); if (e.thrown) this.scene.remove(e.thrown.s); }
+    for (const e of this.enemies) { if (e.g) this.scene.remove(e.g); if (e.f) this.scene.remove(e.f.root); if (e.arc) this.scene.remove(e.arc); if (e.trail) e.trail.dispose(this.scene); if (e.shadow) this.scene.remove(e.shadow); if (e.thrown) this.scene.remove(e.thrown.s); if (e.warnD) this.scene.remove(e.warnD); }
     for (const b of this.bolts) this.scene.remove(b.g);
     for (const s of this.strafes) { this.scene.remove(s.ship, s.shadow); for (const im of s.impacts) this.scene.remove(im.w); }
     for (const p of this.pickups) this.scene.remove(p.g);

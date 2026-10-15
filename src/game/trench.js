@@ -5,12 +5,16 @@
 // Repère : le vaisseau avance vers -z ; x = gauche/droite dans la tranchée, y = hauteur (le fond est à 0).
 import * as THREE from 'three';
 import { Fighter } from '../entities/fighter.js';
-import { canvasTex, glowSprite, toon, toonMat, outlineGeo, outlineMat } from '../engine/gfx.js';
+import { canvasTex, glowSprite, toon, toonMat, outlineGeo, outlineMat, autoDispose, mergeStatic } from '../engine/gfx.js';
 import { sfx } from '../engine/audio.js';
 import { rand, clamp, pick, Script } from './common.js';
 
 const W = 7, H = 10, SEG = 40; // demi-largeur et profondeur de la tranchée, longueur d'un morceau
 const V = () => new THREE.Vector3();
+// les tirs : une seule forme pour tous (on en tire des centaines)
+const ESHOT_GEO = new THREE.SphereGeometry(0.3, 10, 8), ESHOT_MAT = new THREE.MeshBasicMaterial({ color: 0xff5ad8 });
+const SHOT_GEO = new THREE.CapsuleGeometry(0.09, 1.6, 4, 8).rotateX(Math.PI / 2), SHOT_MAT = new THREE.MeshBasicMaterial({ color: 0xeaffd8 });
+ESHOT_GEO.userData.keep = SHOT_GEO.userData.keep = true;
 
 // ---------- textures et matières ----------
 const tileTex = (base, line) => canvasTex(256, 256, (g, w, h) => {
@@ -118,7 +122,7 @@ export class TrenchMode {
     this.z = 0; // où en est le vaisseau (il avance vers -z)
     this.segs = []; this.obst = []; this.turrets = []; this.flyers = []; this.shots = []; this.eshots = [];
     this.genZ = 60; this.mode = 'calme';
-    this.root = new THREE.Group(); this.scene.add(this.root);
+    this.root = autoDispose(new THREE.Group()); this.scene.add(this.root);
     // l'espace : fond noir étoilé, brume au loin
     this.oldBg = this.scene.background; this.oldFog = this.scene.fog;
     this.scene.background = new THREE.Color(0x07040f);
@@ -169,7 +173,7 @@ export class TrenchMode {
       g.add(part(new THREE.CylinderGeometry(0.35, 0.35, SEG, 10).rotateX(Math.PI / 2), 0xb8bec8, s * (W - 0.4), 2.2, z0 - SEG / 2, { outline: 0.04 }));
       g.add(part(new THREE.CylinderGeometry(0.22, 0.22, SEG, 8).rotateX(Math.PI / 2), 0x6a3f8f, s * (W - 0.3), 6.8, z0 - SEG / 2, { outline: 0.03 }));
       for (let k = 0; k < 2; k++) {
-        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.5, 1.4), new THREE.MeshBasicMaterial({ color: 0x8fff5a }));
+        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.5, 1.4), M.lamp || (M.lamp = new THREE.MeshBasicMaterial({ color: 0x8fff5a })));
         lamp.position.set(s * (W - 0.1), 4.5, z0 - 10 - k * 20); g.add(lamp);
       }
       // bâtiments sur le dessus de la station (on les voit dépasser au bord)
@@ -184,6 +188,7 @@ export class TrenchMode {
       const puddle = new THREE.Mesh(new THREE.CircleGeometry(rand(1, 2), 18).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x8fdc3c, transparent: true, opacity: 0.6 }));
       puddle.position.set(rand(-W + 2, W - 2), 0.02, z0 - rand(5, SEG - 5)); g.add(puddle);
     }
+    mergeStatic(g);
     this.root.add(g);
     this.segs.push({ g, z0 });
   }
@@ -236,8 +241,8 @@ export class TrenchMode {
 
   shoot(x, y, z, vx, vy, vz, enemy) {
     const g = new THREE.Group();
-    if (enemy) g.add(new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), new THREE.MeshBasicMaterial({ color: 0xf3dcff })), glowSprite(0xb04cff, 1.8, 0.95));
-    else g.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 1.6, 4, 8).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xeaffd8 })), glowSprite(0x6dff3a, 1.2, 0.7));
+    if (enemy) g.add(new THREE.Mesh(ESHOT_GEO, ESHOT_MAT), glowSprite(0xb04cff, 1.8, 0.95));
+    else g.add(new THREE.Mesh(SHOT_GEO, SHOT_MAT), glowSprite(0x6dff3a, 1.2, 0.7));
     g.position.set(x, y, z);
     this.scene.add(g);
     (enemy ? this.eshots : this.shots).push({ g, v: new THREE.Vector3(vx, vy, vz), life: enemy ? 4 : 1.4 });
@@ -251,6 +256,13 @@ export class TrenchMode {
     sfx.hurt(); this.shakeT = 0.4; this.ctx.flash(0.25);
     this.ctx.puffs.burst(this.obj.position.x, this.obj.position.y, this.obj.position.z, 0xc38be8, 12, 4, { life: 0.8, s0: 0.6, s1: 1.6 });
     this.ctx.hud.hearts(Math.max(0, p.hp), p.maxHp);
+    if (p.hp <= 0 && !this.revived) { // une deuxième chance, une seule fois
+      this.revived = true; p.hp = p.maxHp; p.inv = 3;
+      this.ctx.hud.hearts(p.hp, p.maxHp); sfx.heal();
+      this.ctx.words.pop('2e CHANCE !', this.obj.position.clone().setY(this.obj.position.y + 2), '#8fff5a', 2.2);
+      this.ctx.hud.radio('gazou', 'Abandonner, jamais ! Le Gaz, une deuxième chance te donne.', 3.5);
+      return;
+    }
     if (p.hp <= 0) { this.crashT = 1.6; this.ctx.words.pop('OUPS !', this.obj.position.clone().setY(this.obj.position.y + 2), '#ff8a3d', 2); }
   }
 
@@ -505,6 +517,7 @@ export class TrenchMode {
       const geo = kind < 0.4 ? new THREE.CylinderGeometry(r, r * 1.1, h, 14) : kind < 0.7 ? new THREE.BoxGeometry(r * 2, h, r * 2) : new THREE.SphereGeometry(r, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
       g.add(part(geo, pick([0xe9ece6, 0xd8dce4, 0xcfd6e0, 0xb8a6d8]), x, kind < 0.7 ? H + h / 2 : H, z, { outline: 0.1 }));
     }
+    mergeStatic(g);
     this.root.add(g);
   }
 
@@ -541,8 +554,13 @@ export class TrenchMode {
     el.querySelector('b').textContent = d > 0 ? `${Math.round(d)} m` : '';
     el.classList.toggle('good', good && !h.shot);
     if (this.won) { el.classList.add('hidden'); return; }
-    if (!h.shot) this.ctx.hud.action(d < 80 && d > 0 ? 'TIRE LA CHASSE !' : null);
-    if (!h.shot && this.ctx.input.action && d > 0 && d < 80) {
+    if (!h.shot && !h.armed) this.ctx.hud.action(d < 80 && d > 0 ? 'TIRE LA CHASSE !' : null);
+    // appuyé trop tôt : la torpille attend toute seule que le viseur devienne vert (plus de tir raté pour les petits)
+    if (!h.shot && this.ctx.input.action && d >= 30 && d < 80 && !h.armed) {
+      h.armed = true; this.ctx.hud.action(null);
+      this.say('r2wc', 'Bip ! Torpille prête… elle part toute seule au VERT !', 2.5);
+    }
+    if (!h.shot && ((this.ctx.input.action && d > 0 && d < 30) || (h.armed && good))) {
       // la torpille-prout : une grosse bulle verte qui file vers le trou
       const g = new THREE.Group();
       g.add(new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 10), new THREE.MeshBasicMaterial({ color: 0xeaffd8 })), glowSprite(0x7dff4a, 3, 0.95));
