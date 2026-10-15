@@ -251,6 +251,19 @@ const GUARD = {
   RightForeArm: new THREE.Vector3(0.6, 0.2, 0.78).normalize(),
 };
 const GUARD_BLADE = new THREE.Vector3(0.42, 0.86, 0.3).normalize();
+// les os qu'on peut placer à la main (pour les coups de pied du duel)
+const POSE_BONES = ['RightArm', 'RightForeArm', 'LeftArm', 'LeftForeArm', 'RightUpLeg', 'RightLeg', 'LeftUpLeg', 'LeftLeg', 'Spine'];
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z).normalize();
+// les coups de pied : direction de chaque os (personnage qui regarde vers +z ; sa droite est vers -x)
+// (le sabre se lève en arrière pendant le coup de pied, pour bien voir la jambe)
+const SABER_BACK = { RightArm: V3(-0.75, 0.45, -0.45), RightForeArm: V3(-0.35, 0.9, -0.25), LeftArm: V3(0.55, 0.15, 0.8), LeftForeArm: V3(0.3, 0.3, 0.9), blade: V3(-0.2, 0.92, -0.35) };
+export const KICK_POSES = {
+  side: { ...SABER_BACK, RightUpLeg: V3(-0.2, 0.32, 0.93), RightLeg: V3(-0.15, 0.34, 0.93), Spine: V3(0.3, 0.82, -0.48), LeftUpLeg: V3(0.15, -1, -0.25) },
+  high: { ...SABER_BACK, RightUpLeg: V3(-0.1, 0.82, 0.56), RightLeg: V3(-0.08, 0.96, 0.25), Spine: V3(0, 0.78, -0.62) },
+  low: { ...SABER_BACK, RightUpLeg: V3(-0.35, -0.3, 0.89), RightLeg: V3(-0.25, -0.45, 0.86), LeftUpLeg: V3(0.15, -0.5, 0.85), LeftLeg: V3(0.1, -1, -0.35), Spine: V3(0, 0.8, 0.6) },
+  spin: { ...SABER_BACK, RightUpLeg: V3(-0.45, 0.3, 0.84), RightLeg: V3(-0.4, 0.33, 0.85), Spine: V3(0.3, 0.88, -0.35) },
+  fly: { ...SABER_BACK, RightUpLeg: V3(-0.15, -0.1, 1), RightLeg: V3(-0.1, -0.05, 1), LeftUpLeg: V3(0.1, -0.2, 0.95), LeftLeg: V3(0.1, -1, -0.2) },
+};
 
 export class Fighter {
   constructor(kind, height) {
@@ -368,7 +381,8 @@ export class Fighter {
       // les pieds : on les gardera à plat (les pieds du Knight sont minuscules et tournés autrement)
       const flat = ln === 'LeftFoot' || ln === 'RightFoot' ? { qL0: qL0.clone(), knee: K.parent } : null;
       const guard = GUARD[ln] && KC ? { rest: dir(K, KC), to: GUARD[ln] } : null;
-      pairs.push({ K, L, qK0inv: qK0.invert(), qLA, flat, guard });
+      const rest = POSE_BONES.includes(ln) && KC ? dir(K, KC) : null;
+      pairs.push({ K, L, qK0inv: qK0.invert(), qLA, flat, guard, rest, name: ln });
     }
     const map = new Map(pairs.map((p) => [p.L, p]));
     const order = [];
@@ -417,6 +431,9 @@ export class Fighter {
         let want = qK.multiply(P.qK0inv).multiply(P.qLA);
         if (P.flat) want = this.flatFoot(P, want);
         if (P.guard && this.guardW > 0.001) want.slerp(new THREE.Quaternion().setFromUnitVectors(P.guard.rest, P.guard.to).multiply(P.qLA), this.guardW);
+        // une pose imposée (coup de pied…) : l'os pointe dans la direction voulue
+        const to = this.pose && this.pose.w > 0.001 && P.rest && this.pose.dirs[P.name];
+        if (to) want.slerp(new THREE.Quaternion().setFromUnitVectors(P.rest, to).multiply(P.qLA), this.pose.w);
         b.quaternion.copy(parentQ.clone().invert().multiply(want));
         world.set(b, want);
       } else {
@@ -432,10 +449,13 @@ export class Fighter {
     L.lucas.updateMatrixWorld(true);
     // en garde : la lame se redresse bien devant lui
     if (this.saber && this.gripQ) {
-      if (this.guardW > 0.001) {
-        const want = this.root.getWorldQuaternion(new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), GUARD_BLADE));
+      // pendant un coup de pied, le sabre se lève (pour bien voir la jambe) ; en garde, il est droit devant
+      const kick = this.pose && this.pose.dirs.blade ? this.pose.w : 0;
+      const w = Math.max(this.guardW, kick), dir = kick > this.guardW ? this.pose.dirs.blade : GUARD_BLADE;
+      if (w > 0.001) {
+        const want = this.root.getWorldQuaternion(new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir));
         const local = this.lucasHand.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(want);
-        this.saber.quaternion.copy(this.gripQ).slerp(local, this.guardW);
+        this.saber.quaternion.copy(this.gripQ).slerp(local, w);
       } else this.saber.quaternion.copy(this.gripQ);
     }
   }
@@ -445,6 +465,13 @@ export class Fighter {
     this.yaw += d * Math.min(1, dt * speed);
   }
 
+  footEnds(base, tip) {
+    if (!this.L) return false;
+    this.L.knee = this.L.knee || this.L.lucas.getObjectByName('mixamorigRightLeg');
+    this.L.toe = this.L.toe || this.L.lucas.getObjectByName('mixamorigRightToe_End') || this.L.lucas.getObjectByName('mixamorigRightFoot');
+    this.L.knee.getWorldPosition(base); this.L.toe.getWorldPosition(tip);
+    return true;
+  }
   saberEnds(base, tip) {
     this.saber.userData.base.getWorldPosition(base);
     this.saber.userData.tip.getWorldPosition(tip);

@@ -357,3 +357,10 @@ body.phone #game.narrow #radio:not(.hidden) ~ #bossbar { top: 214px; }
 #game.narrow #vs .vsSide img { width: 36px; height: 36px; }
 #game.narrow #vs .vsSide b { font-size: 11px; }
 #game.narrow #vs .vsTime { font-size: 24px; min-width: 40px; }
+
+#vs .vsSay { position: absolute; top: 118px; max-width: 42%; font-family: system-ui, sans-serif; font-weight: 800; font-size: 13px; line-height: 1.2;
+  color: var(--ink); background: #fff7e0; border: 3px solid var(--ink); border-radius: 12px; padding: 4px 8px; box-shadow: 0 3px 0 var(--ink); animation: vsComboPop .25s ease-out; }
+#vs .vsSay.L { left: 10px; border-top-left-radius: 2px; } #vs .vsSay.R { right: 10px; border-top-right-radius: 2px; text-align: right; }
+#vs .vsSay.hidden { display: none; }
+#game.narrow #vs .vsSay { top: 104px; font-size: 11px; }
+#vs .vsBanner.small, #vs .vsBanner.super { top: 19%; }

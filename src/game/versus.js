@@ -6,7 +6,7 @@
 // L'arène : la salle du trône, avec le public (les amis de Lucas d'un côté, les soldats de l'autre).
 // Repère : les combattants sont sur l'axe x (z = 0), le sol est à y = 0, la caméra regarde depuis +z.
 import * as THREE from 'three';
-import { Fighter, SaberTrail } from '../entities/fighter.js';
+import { Fighter, SaberTrail, KICK_POSES } from '../entities/fighter.js';
 import { canvasTex, glowSprite, toon } from '../engine/gfx.js';
 import { sfx } from '../engine/audio.js';
 import { rand, clamp, pick } from './common.js';
@@ -22,6 +22,12 @@ const MOVES = {
   lunge: { anim: 'stab', speed: 1.5, hit: 0.4, reach: 2.9, dmg: 9, kb: 5, dash: 8, heavy: true },
   air: { anim: 'atk3', speed: 2.0, hit: 0.33, reach: 2.4, dmg: 8, kb: 5 },
   kick: { anim: 'kick', speed: 1.7, hit: 0.42, reach: 2.0, dmg: 5, kb: 7 },
+  // les coups de pied de Lucas (un au hasard à chaque fois)
+  kSide: { anim: 'kick', speed: 1.5, hit: 0.45, reach: 2.7, dmg: 7, kb: 9, pose: 'side', word: 'PIED DE CÔTÉ !' },
+  kHigh: { anim: 'kick', speed: 1.5, hit: 0.45, reach: 2.4, dmg: 8, kb: 5, pose: 'high', high: true, word: 'PIED HAUT !' },
+  kLow: { anim: 'kick', speed: 1.6, hit: 0.45, reach: 2.5, dmg: 6, kb: 4, pose: 'low', knock: true, word: 'BALAYETTE !' },
+  kSpin: { anim: 'kick', speed: 1.1, hit: 0.6, reach: 2.6, dmg: 9, kb: 10, pose: 'spin', spin: true, heavy: true, word: 'PIED RETOURNÉ !' },
+  kFly: { anim: 'jumpAir', speed: 1, hit: 0.3, reach: 2.6, dmg: 8, kb: 7, pose: 'fly', air: true, word: 'PIED SAUTÉ !', len: 0.5 },
   counter: { anim: 'counter', speed: 1.6, hit: 0.35, reach: 2.6, dmg: 8, kb: 6, heavy: true },
   rheavy: { anim: 'bigChop', speed: 1.25, hit: 0.5, reach: 3.0, dmg: 11, kb: 8, dash: 4, knock: true, heavy: true },
 };
@@ -177,11 +183,12 @@ export class VersusMode {
     f.root.traverse((o) => { if (o.isMesh && o.visible) o.castShadow = true; });
     this.scene.add(f.root);
     const trail = new SaberTrail(this.scene, kind === 'lucas' ? f.saber.userData.trailColor : 0xb04cff, 18);
+    const footTrail = new SaberTrail(this.scene, 0xfff6c8, 12); // la traînée blanche derrière le pied
     const shield = new THREE.Mesh(new THREE.SphereGeometry(kind === 'lucas' ? 1.35 : 1.7, 24, 16),
       new THREE.MeshBasicMaterial({ color: kind === 'lucas' ? 0x6fd3ff : 0xc38bff, transparent: true, opacity: 0, depthWrite: false }));
     shield.renderOrder = 4;
     this.root.add(shield);
-    return { kind, f, trail, shield, shieldGlow: 0, x, y: 0, vx: 0, vy: 0, face, hp, maxHp: hp, shown: hp, state: 'idle', move: null, mt: 0,
+    return { kind, f, trail, footTrail, shield, shieldGlow: 0, x, y: 0, vx: 0, vy: 0, face, hp, maxHp: hp, shown: hp, state: 'idle', move: null, mt: 0,
       combo: 0, hits: 0, hitsT: 0, stun: 0, blocking: false, blockAge: 9, gauge: 0, startX: x, inv: 0, downT: 0, flip: null, forceCool: 1.5 };
   }
 
@@ -196,6 +203,7 @@ export class VersusMode {
         <div class="vsSide R"><div><b>DARK ROTEUR</b><div class="vsBar"><u></u><i></i></div><div class="vsGauge"><i></i><em></em></div><span class="pips"></span></div><img src="assets/portraits/roteur.webp" alt=""></div>
       </div>
       <div class="vsCombo L hidden"></div><div class="vsCombo R hidden"></div>
+      <div class="vsSay L hidden"></div><div class="vsSay R hidden"></div>
       <div class="vsSplash hidden"><img class="a" src="assets/persos/lucas.webp" alt=""><b>VS</b><img class="b" src="assets/persos/roteur.webp" alt=""></div>
       <div class="vsBanner hidden"></div>
       <div class="vsPad left">
@@ -249,6 +257,13 @@ export class VersusMode {
     clearTimeout(this.bannerH);
     this.bannerH = setTimeout(() => b.classList.add('hidden'), dur * 1000);
   }
+  // un petit mot sous la barre de vie de celui qui parle (sans cacher le combat)
+  say(who, text, dur = 2.2) {
+    const el = this.hud.querySelector(who.startsWith('lucas') ? '.vsSay.L' : '.vsSay.R');
+    el.textContent = text; el.classList.remove('hidden');
+    el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+    clearTimeout(el.h); el.h = setTimeout(() => el.classList.add('hidden'), Math.min(dur, 2.5) * 1000);
+  }
   showCombo(P) {
     const el = this.hud.querySelector(P === this.L ? '.vsCombo.L' : '.vsCombo.R');
     if (P.hits < 2) { el.classList.add('hidden'); return; }
@@ -279,7 +294,7 @@ export class VersusMode {
       setTimeout(() => sp.classList.add('hidden'), 1400);
       setTimeout(go, 1400);
       this.R.f.play('cheer', 1.2); // il se moque de Lucas
-      this.ctx.hud.radio('roteur', 'En garde, petit rigolo ! Je vais te faire roter de peur ! BUUURP !', 3.5);
+      this.say('roteur', 'En garde, petit rigolo ! Je vais te faire roter de peur ! BUUURP !', 3.5);
       sfx.burp();
     } else go();
     this.updateHud(1);
@@ -294,8 +309,8 @@ export class VersusMode {
     loser.state = 'ko'; loser.flip = null; loser.f.model.rotation.set(0, 0, 0); loser.f.model.position.set(0, 0, 0); loser.f.play('death2', 1.1); loser.f.guard = false;
     winner.state = 'win'; winner.f.guard = false;
     setTimeout(() => { if (winner.state === 'win') { winner.f.play('cheer', 1); sfx.win(); } }, 1300);
-    if (winner === this.L) this.ctx.hud.radio('lucas_rire', pick(['Ha ha ! Pris dans le gaz !', 'Prrrout ! Gagné !', 'Que le Gaz soit avec moi !']), 2.5);
-    else this.ctx.hud.radio('roteur', pick(['BUUURP ! Trop facile !', 'Ha ha ha ! Le côté obscur du rot !']), 2.5);
+    if (winner === this.L) this.say('lucas_rire', pick(['Ha ha ! Pris dans le gaz !', 'Prrrout ! Gagné !', 'Que le Gaz soit avec moi !']), 2.5);
+    else this.say('roteur', pick(['BUUURP ! Trop facile !', 'Ha ha ha ! Le côté obscur du rot !']), 2.5);
   }
 
   // le public saute de joie (side : -1 les amis de Lucas, +1 les soldats)
@@ -362,8 +377,10 @@ export class VersusMode {
   startMove(P, name) {
     const M = MOVES[name];
     P.move = { ...M, name, done: false };
-    P.mt = P.f.play(M.anim, M.speed, 0.85);
+    P.mt = M.len || P.f.play(M.anim, M.speed, 0.85);
+    if (M.len) P.f.play(M.anim, M.speed, 9);
     P.move.len = P.mt;
+    if (M.word) this.pop(M.word, _a.set(P.x, P.y + 3.3, 0.5).clone(), '#ffd23f', 1.2);
     P.state = 'attack'; P.f.guard = false;
     if (P === this.L) sfx.swing(1 + P.combo * 0.12); else sfx.swing(0.8, 'classique');
     if (M.dash) P.vx = P.face * M.dash;
@@ -378,7 +395,7 @@ export class VersusMode {
       P.mt = P.f.play('raise', 1.6, 0.62); P.move.len = P.mt;
       this.hud.classList.add('dark');
       this.banner(lucas ? 'MÉGA-PROUT !' : 'MÉGA-ROT !', 1.3, 'super');
-      if (lucas) { sfx.mega(); this.ctx.hud.radio('lucas', 'Que le Gaz soit avec moi… MÉGA-PROUUUT !', 2); } else { sfx.burp(); this.ctx.hud.radio('roteur', 'Goûte à mon MÉGA-ROOOT !', 2); }
+      if (lucas) { sfx.mega(); this.say('lucas', 'Que le Gaz soit avec moi… MÉGA-PROUUUT !', 2); } else { sfx.burp(); this.say('roteur', 'Goûte à mon MÉGA-ROOOT !', 2); }
       return;
     }
     if (lucas) { P.gauge -= 0.5; this.banner('PROUT-KEN !', 0.9, 'small'); }
@@ -475,7 +492,9 @@ export class VersusMode {
       if (P.move && P.move.reach && !P.move.done && P.mt <= P.move.len * (1 - P.move.hit)) {
         P.move.done = true;
         const dx = (O.x - P.x) * P.face;
-        if (dx > -0.4 && dx < P.move.reach && Math.abs(O.y - P.y) < 1.9) this.hitBy(O, P, P.move.dmg, P.move.kb, { knock: P.move.knock, heavy: P.move.heavy });
+        if (dx > -0.4 && dx < P.move.reach && Math.abs(O.y - P.y) < (P.move.high ? 3.2 : 1.9)) {
+          if (this.hitBy(O, P, P.move.dmg, P.move.kb, { knock: P.move.knock, heavy: P.move.heavy }) && P.move.high && O.state !== 'ko') { O.vy = 7; O.y = Math.max(O.y, 0.01); }
+        }
       }
       if (onGround) P.vx *= Math.exp(-dt * 7);
       if (P.mt <= 0 || (ctl.block && P.move && P.move.done && onGround)) { P.state = 'idle'; P.move = null; }
@@ -512,7 +531,12 @@ export class VersusMode {
         if (!onGround) this.startMove(P, 'air');
         else if (ctl.move * P.face > 0.5) this.startMove(P, 'lunge');
         else { P.combo = 0; this.startMove(P, 'atk1'); }
-      } else if (ctl.kick) { P.blocking = false; this.startMove(P, 'kick'); }
+      } else if (ctl.kick) {
+        P.blocking = false;
+        // Lucas : un coup de pied différent à chaque fois (Dark Roteur : son coup de pied à lui)
+        if (P === this.L && P.f.L) this.startMove(P, !onGround ? 'kFly' : pick(['kSide', 'kHigh', 'kLow', 'kSpin', 'kSide', 'kHigh']));
+        else this.startMove(P, 'kick');
+      }
       else if (ctl.heavy && onGround) this.startMove(P, 'rheavy');
       // la pose
       if (onGround && P.state !== 'attack') {
@@ -532,6 +556,15 @@ export class VersusMode {
         else if (P.state === 'down') { this.ctx.puffs.burst(P.x, 0.2, 0, 0xb8a6d8, 12, 5, { life: 0.8, s0: 0.7, s1: 2 }); this.shakeT = 0.2; sfx.land(); }
       }
     }
+    // les coups de pied : la jambe se lève (pose imposée) et le pied retourné fait un tour complet
+    const M = P.state === 'attack' && P.move && P.move.pose ? P.move : null;
+    if (M) {
+      const k = 1 - P.mt / P.move.len; // 0 → 1 pendant le coup
+      const w = clamp(Math.min(k / 0.3, (1 - k) / 0.3), 0, 1);
+      P.f.pose = { dirs: KICK_POSES[M.pose], w };
+      if (M.spin) P.f.model.rotation.y = -P.face * Math.min(1, k / 0.6) * Math.PI * 2;
+    } else if (P.f.pose) { P.f.pose = null; if (!P.flip) P.f.model.rotation.y = 0; }
+    if (P.f.footEnds(_a, _b)) P.footTrail.push(_a, _b, !!M);
     // la pirouette : il tourne sur lui-même en arrière, roulé en boule
     if (P.flip) {
       P.flip.t += dt;
@@ -543,7 +576,8 @@ export class VersusMode {
     P.x = clamp(P.x, -EDGE, EDGE);
     // l'apparence
     P.f.root.position.set(P.x, P.y, 0);
-    const yaw = P.face > 0 ? Math.PI / 2 - 0.45 : -Math.PI / 2 + 0.45; // de profil, un peu tourné vers nous
+    const turn = P.f.pose ? 0.08 : 0.45; // de profil, un peu tourné vers nous (bien de profil pendant un coup de pied)
+    const yaw = P.face > 0 ? Math.PI / 2 - turn : -Math.PI / 2 + turn;
     P.f.yaw += (yaw - P.f.yaw) * Math.min(1, dt * 14);
     P.f.update(dt);
     P.f.saberEnds(_a, _b); P.trail.push(_a, _b, P.state === 'attack');
@@ -572,7 +606,7 @@ export class VersusMode {
     if (R.gauge >= 1 && R.state === 'idle' && d > 2.5) {
       R.gauge = 0;
       this.banner('MÉGA-ROT ! SAUTE !', 1.4, 'super');
-      this.ctx.hud.radio('roteur', 'MÉGA-ROOOOOT !', 2);
+      this.say('roteur', 'MÉGA-ROOOOOT !', 2);
       R.state = 'attack'; R.move = { name: 'wave', done: false };
       R.mt = R.f.play('raise', 1.5, 0.6); R.move.len = R.mt;
       setTimeout(() => { if (R.state === 'attack' && this.phase === 'fight') this.throwBall(R, 'wave'); }, 700);
@@ -760,7 +794,7 @@ export class VersusMode {
   }
 
   dispose() {
-    for (const P of [this.L, this.R]) { this.scene.remove(P.f.root); P.trail.dispose(this.scene); }
+    for (const P of [this.L, this.R]) { this.scene.remove(P.f.root); P.trail.dispose(this.scene); P.footTrail.dispose(this.scene); }
     this.scene.remove(this.root);
     if (this.world) this.world.group.visible = this.oldWorldVis;
     this.scene.background = this.oldBg; this.scene.fog = this.oldFog || null;
