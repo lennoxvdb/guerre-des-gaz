@@ -37,6 +37,8 @@ const BONES = [
 ];
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _rootQi = new THREE.Quaternion(), _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4();
 const _p = new THREE.Vector3(), _p2 = new THREE.Vector3(), _s = new THREE.Vector3();
+// direction de la lame au repos (bras en A, paumes vers le bas) : vers l'avant, côté pouce
+const GRIP_DIR = new THREE.Vector3(0, 0, 1);
 const findBone = (o, name) => o.getObjectByName('mixamorig' + name) || o.getObjectByName('mixamorig:' + name);
 
 // matière toon de notre Lucas, avec le flash blanc quand il est touché
@@ -250,10 +252,9 @@ export class Fighter {
     const head = model.getObjectByName('head');
     const hand = model.getObjectByName('handslotr');
     if (kind === 'lucas' && lucasSrc) {
-      this.setupLucas3D(model, height);
-      this.saber = makeCustomSaber(); // le sabre fabriqué dans l'atelier : il suit la main de notre Lucas
-      this.root.add(this.saber);
-      this.saberSlot = hand;
+      this.setupLucas3D(model, height, hand);
+      this.saber = null;
+      this.replaceSaber(makeCustomSaber()); // le sabre fabriqué dans l'atelier, bien serré dans la main de Lucas
     } else if (kind === 'lucas') {
       const hair = lucasHair(); hair.position.set(0, 0.12, -0.05); head.add(hair);
       this.saber = makeCustomSaber(); // le sabre fabriqué dans l'atelier
@@ -320,7 +321,7 @@ export class Fighter {
   }
 
   // ---------- notre Lucas 3D ----------
-  setupLucas3D(model, height) {
+  setupLucas3D(model, height, knightSlot) {
     // le Knight reste là, invisible : c'est lui qui joue les animations
     model.traverse((o) => { if (o.isMesh) o.visible = false; });
     const lucas = skeletonClone(lucasSrc);
@@ -356,6 +357,15 @@ export class Fighter {
     this.lucasHand = findBone(lucas, 'RightHand');
     this.lucasChest = findBone(lucas, 'Spine2');
     this.knightScale = height / 2.3;
+    // la prise du sabre, calculée au repos : le manche au creux du poing, la lame qui sort côté pouce (vers l'avant)
+    const hand = this.lucasHand, finger = findBone(lucas, 'RightHandIndex1');
+    const hp = hand.getWorldPosition(new THREE.Vector3()), fp = finger.getWorldPosition(new THREE.Vector3());
+    const along = fp.clone().sub(hp), len = along.length(); along.normalize();
+    const blade = GRIP_DIR.clone().addScaledVector(along, -GRIP_DIR.dot(along)).normalize();
+    const gripPos = hp.clone().addScaledVector(along, len * 0.9).add(new THREE.Vector3(0, -len * 0.25, 0));
+    const gripQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), blade);
+    const world = new THREE.Matrix4().compose(gripPos, gripQ, knightSlot.getWorldScale(new THREE.Vector3()));
+    this.grip = new THREE.Matrix4().copy(hand.matrixWorld).invert().multiply(world);
   }
 
   // à chaque image : les os de Lucas prennent la pose du Knight caché
@@ -383,15 +393,6 @@ export class Fighter {
     _m2.copy(_m).multiply(L.hipsL.parent.matrixWorld).invert();
     L.hipsL.position.copy(_p.applyMatrix4(_m2));
     L.lucas.updateMatrixWorld(true);
-    // le sabre : dans la main de Lucas, avec la même orientation que dans la main du Knight
-    if (this.saber && this.saberSlot) {
-      const slotQ = this.saberSlot.getWorldQuaternion(_q);
-      const off = this.saberSlot.getWorldPosition(_p).sub(this.saberSlot.parent.getWorldPosition(_p2)); // de la main au manche
-      const handPos = this.lucasHand.getWorldPosition(_p2).add(off.multiplyScalar(0.6));
-      _m.compose(handPos, slotQ, this.saberSlot.getWorldScale(_s));
-      _m2.copy(this.root.matrixWorld).invert().multiply(_m);
-      _m2.decompose(this.saber.position, this.saber.quaternion, this.saber.scale);
-    }
   }
 
   turnTo(yaw, dt, speed = 12) {
@@ -435,7 +436,7 @@ export class Fighter {
   replaceSaber(s) {
     if (this.saber && this.saber.parent) this.saber.parent.remove(this.saber);
     this.saber = s;
-    if (this.saberSlot) this.root.add(s); else this.hand.add(s);
+    if (this.grip) { this.grip.decompose(s.position, s.quaternion, s.scale); this.lucasHand.add(s); } else this.hand.add(s);
   }
   setSaberOn(k) {
     if (!this.saber) return;
