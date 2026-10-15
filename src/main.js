@@ -492,7 +492,7 @@ function startPart(part, carry = {}) {
     hud.classList.add('flight');
     $('flightHelp').classList.toggle('hidden', !touchDevice);
     const startPos = carry.startPos || (world.wcSpot ? world.wcSpot.clone() : new THREE.Vector3());
-    mode = new FlightMode(ctx, { script: m.flight.script, startPos, hp: carry.hp ?? DIFF.hp, mega: carry.mega ?? 0, skipIntro: carry.retry || !world.wcSpot });
+    mode = new FlightMode(ctx, { script: m.flight.script, startPos, hp: carry.hp ?? DIFF.hp, mega: carry.mega ?? 0, skipIntro: carry.retry || !world.wcSpot, chase: save.vue === 'cinema' });
     playMusic('flight');
   } else if (part === 'versus') {
     mode = new VersusMode(ctx, {});

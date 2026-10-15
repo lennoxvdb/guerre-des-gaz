@@ -39,6 +39,16 @@ function part(geo, color, x, y, z, o = {}) {
   return g;
 }
 
+// une crotte de l'espace en 3D : trois boudins empilés et une pointe
+export function makePoop(size = 2.6) {
+  const g = new THREE.Group();
+  const k = size / 2.6;
+  for (const [y, r, t] of [[0, 1.05, 0.5], [0.62, 0.78, 0.42], [1.12, 0.5, 0.33]]) g.add(part(new THREE.TorusGeometry(r * k, t * k, 10, 22), 0x7a4a22, 0, y * k, 0, { rx: Math.PI / 2, outline: 0.04 }));
+  g.add(part(new THREE.ConeGeometry(0.42 * k, 0.75 * k, 12), 0x7a4a22, 0, 1.6 * k, 0, { outline: 0.03 }));
+  for (const s of [-1, 1]) g.add(part(new THREE.SphereGeometry(0.16 * k, 10, 8), 0xffffff, s * 0.3 * k, 0.75 * k, 0.85 * k, { outline: 0.02 }));
+  return g;
+}
+
 // ---------- les vaisseaux en 3D ----------
 // le chasseur-WC : une cuvette volante avec son réservoir, sa lunette, et quatre ailes en X
 export function makeWcFighter() {
@@ -73,7 +83,7 @@ export function makeWcFighter() {
   return g;
 }
 // chasseur-rot de Dark Roteur : une boule violette à gros yeux et deux grands panneaux à six côtés
-function makeRotFighter(big = false) {
+export function makeRotFighter(big = false) {
   const g = new THREE.Group();
   const col = big ? 0x3a2d4d : 0x6a3f8f;
   g.add(part(new THREE.SphereGeometry(0.9, 16, 12), col, 0, 0, 0));
@@ -89,7 +99,7 @@ function makeRotFighter(big = false) {
   return g;
 }
 // le Faucon Pétulant de Han Popo : une grosse galette avec deux mandibules devant
-function makeFaucon() {
+export function makeFaucon() {
   const g = new THREE.Group();
   g.add(part(new THREE.CylinderGeometry(3, 3.2, 0.8, 24), 0xcfc6ae, 0, 0, 0, { outline: 0.08 }));
   g.add(part(new THREE.CylinderGeometry(1.2, 1.2, 0.4, 18), 0xa89f88, 0, 0.55, 0.2));

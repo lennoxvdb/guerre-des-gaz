@@ -8,6 +8,7 @@ import { makePlunger } from '../entities/plunger.js';
 import { makeStinkStar } from '../entities/etoile.js';
 import { sfx } from '../engine/audio.js';
 import { SR, SU, rand, clamp, pick, Script } from './common.js';
+import { makeWcFighter, makeRotFighter, makeFaucon, makePoop } from './trench.js';
 
 export const ALT = 5;
 const beamGeo = new THREE.CapsuleGeometry(0.11, 0.9, 4, 8).rotateX(Math.PI / 2);
@@ -36,7 +37,15 @@ export class FlightMode {
     const p = this.ship = {
       x: 0, y: 0, hp: opts.hp, maxHp: ctx.diff.hp, inv: 0, power: 1, fireT: 0, mega: opts.mega ?? 0, tilt: 0,
     };
-    this.obj = flatSprite(TEX.wc, 2.6);
+    // la vue « derrière le vaisseau » (bouton 🎥 Vue) : tout en vraie 3D, la caméra suit le chasseur-WC
+    this.chase = !!opts.chase;
+    this.obj = this.chase ? makeWcFighter() : flatSprite(TEX.wc, 2.6);
+    if (this.chase) {
+      this.obj.scale.setScalar(0.8);
+      this.cam3 = new THREE.PerspectiveCamera(58, ctx.aspect(), 0.1, 500);
+      this.oldFog = this.scene.fog;
+      this.scene.fog = new THREE.Fog(this.world.T.sky, 60, 170);
+    }
     this.shadow = shadowBlob(2.4);
     this.space = !!this.world.space; // dans l'espace : pas de sol, pas d'ombres, des astéroïdes-crottes
     this.shadow.visible = !this.space;
@@ -83,7 +92,9 @@ export class FlightMode {
 
   // ---------- ennemis ----------
   addFlyer(kind, x, y, move, opts = {}) {
-    const o = kind === 'boss' ? makePlunger() : kind === 'star' ? makeStinkStar() : kind === 'rock' ? flatSprite(TEX.crotte, opts.size || 2.6) : flatSprite(TEX.rot, 2.2);
+    const o = kind === 'boss' ? makePlunger() : kind === 'star' ? makeStinkStar()
+      : kind === 'rock' ? (this.chase ? makePoop(opts.size || 2.6) : flatSprite(TEX.crotte, opts.size || 2.6))
+      : this.chase ? makeRotFighter() : flatSprite(TEX.rot, 2.2);
     const sh = shadowBlob(kind === 'boss' ? 7 : 2);
     sh.visible = !this.space;
     this.scene.add(o, sh);
@@ -305,7 +316,8 @@ export class FlightMode {
 
   dropPickup(at) {
     const kind = this.ship.power < 3 && Math.random() < 0.5 ? 'power' : 'heal';
-    const o = flatSprite(TEX.bonus, 1.1);
+    const o = this.chase ? new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.bonus })) : flatSprite(TEX.bonus, 1.1);
+    if (this.chase) o.scale.setScalar(1.4);
     const glow = glowSprite(kind === 'power' ? 0x8fff5a : 0xff6a8a, 2.6, 0.7);
     const g = new THREE.Group(); g.add(glow, o);
     this.scene.add(g);
@@ -358,8 +370,9 @@ export class FlightMode {
       const k = 1 - Math.max(0, this.intro) / this.introMax, e = k * k * (3 - 2 * k);
       const end = this.wp(p.x, p.y);
       this.obj.position.lerpVectors(this.start.clone().setY(1), end, e);
-      this.obj.rotation.y = screenYaw(0);
+      this.obj.rotation.y = screenYaw(0); // (en 3D comme à plat : le nez vers le haut de l'écran)
       this.shadow.position.set(this.obj.position.x, 0.04, this.obj.position.z);
+      if (this.chase) this.placeChase(dt, true);
       cam.elev = e;
       cam.target.lerpVectors(this.start.clone().setY(1), this.wp(0, 0), e);
       if (Math.random() < 0.8) this.ctx.puffs.emit(this.obj.position.x, this.obj.position.y - 0.3, this.obj.position.z, 0x9be36b, { vy: -3, vx: rand(-2, 2), vz: rand(-2, 2), life: 0.8, s0: 0.8, s1: 2 });
@@ -403,7 +416,8 @@ export class FlightMode {
     }
     const w = this.wp(p.x, p.y);
     this.obj.position.copy(w);
-    this.obj.rotation.y = screenYaw(0) - p.tilt * 0.5;
+    if (this.chase) { this.obj.rotation.order = 'YXZ'; this.obj.rotation.set(0, Math.PI / 4, -p.tilt * 1.4); }
+    else this.obj.rotation.y = screenYaw(0) - p.tilt * 0.5;
     this.obj.visible = p.inv <= 0 || Math.floor(this.t * 14) % 2 === 0;
     this.shadow.position.set(w.x, 0.04, w.z);
     if (Math.random() < 0.7) this.ctx.glows.emit(w.x - SU.x * 1.4, ALT - 0.1, w.z - SU.z * 1.4, 0x8fff5a, { vx: -SU.x * 4, vz: -SU.z * 4, life: 0.3, s0: 0.7, s1: 0.2 });
@@ -503,7 +517,7 @@ export class FlightMode {
         }
       }
       this.wp(e.x, e.y, e.o.position);
-      if (e.move !== 'boss') e.o.rotation.y = screenYaw(e.ang ?? Math.PI);
+      if (e.move !== 'boss') e.o.rotation.y = screenYaw(e.ang ?? Math.PI) + (this.chase && e.kind === 'rot' ? Math.PI : 0);
       if (e.o.userData.mat) e.o.userData.mat.color.setScalar(e.flash > 0 ? 3 : 1);
       else if (e.o.userData.mats) for (const m of e.o.userData.mats) m.emissiveIntensity = e.flash > 0 ? 0.1 : m.userData.base || 0;
       e.sh.position.set(e.o.position.x, 0.04, e.o.position.z);
@@ -534,7 +548,7 @@ export class FlightMode {
       const dx = p.x - b.x, dy = p.y - b.y, d = Math.hypot(dx, dy);
       if (d < 4) { b.x += dx / d * 12 * dt; b.y += dy / d * 12 * dt; } else b.y -= 2.5 * dt;
       this.wp(b.x, b.y, b.g.position);
-      b.g.children[1].rotation.y = screenYaw(Math.sin(b.t * 3) * 0.3);
+      if (!this.chase) b.g.children[1].rotation.y = screenYaw(Math.sin(b.t * 3) * 0.3);
       if (d < 1.3) {
         if (b.kind === 'power') { p.power = Math.min(3, p.power + 1); sfx.pickup(); this.ctx.words.pop('TIR + !', this.wp(p.x, p.y).setY(ALT + 1.5), '#8fff5a', 1.2); }
         else { p.hp = Math.min(p.maxHp, p.hp + 1); sfx.heal(); this.ctx.hud.hearts(p.hp, p.maxHp); this.ctx.words.pop('+1 ❤', this.wp(p.x, p.y).setY(ALT + 1.5), '#ff6a8a', 1.2); }
@@ -567,7 +581,22 @@ export class FlightMode {
 
     cam.target.copy(this.wp(0, 0));
     this.world.follow(this.wp(0, 0).setY(0));
+    if (this.chase) this.placeChase(dt);
     return this.result;
+  }
+
+  // la caméra derrière le chasseur-WC : un peu au-dessus, elle regarde loin devant (là d'où arrivent les ennemis)
+  placeChase(dt, intro) {
+    const p = this.ship, a = this.ctx.aspect();
+    const eye = intro ? this.obj.position.clone().addScaledVector(SU, -9).setY(this.obj.position.y + 4)
+      : this.wp(p.x * 0.6, p.y - (a < 1 ? 12 : 10)).setY(ALT + (a < 1 ? 5.5 : 4.3));
+    const look = intro ? this.obj.position.clone().addScaledVector(SU, 10) : this.wp(p.x * 0.6, p.y + 12).setY(ALT - 0.6);
+    this.chaseEye = this.chaseEye ? this.chaseEye.lerp(eye, Math.min(1, dt * 5)) : eye.clone();
+    this.chaseLook = this.chaseLook ? this.chaseLook.lerp(look, Math.min(1, dt * 5)) : look.clone();
+    this.cam3.position.copy(this.chaseEye);
+    this.cam3.lookAt(this.chaseLook);
+    this.cam3.rotation.z += p.tilt * 0.12;
+    this.cam3.fov = a < 1 ? 72 : 58; this.cam3.aspect = a; this.cam3.updateProjectionMatrix();
   }
 
   updateBoss(e, dt) {
@@ -644,6 +673,7 @@ export class FlightMode {
 
   // crottes de l'espace qui flottent loin en dessous (décor)
   spaceDecor() {
+    if (this.chase) { const o = makePoop(1.5 + this.R() * 4); o.rotation.set(this.R() * 6, this.R() * 6, this.R() * 6); return o; }
     const o = flatSprite(TEX.crotte, 1.5 + this.R() * 4);
     o.rotation.y = this.R() * 6.28;
     o.userData.mat.color.setScalar(0.55 + this.R() * 0.3);
@@ -652,7 +682,8 @@ export class FlightMode {
 
   // le Faucon Pétulant de Han Popo aide au début du vol
   addHan() {
-    const o = flatSprite(TEX.faucon, 3.6);
+    const o = this.chase ? makeFaucon() : flatSprite(TEX.faucon, 3.6);
+    if (this.chase) o.scale.setScalar(0.7);
     const sh = shadowBlob(3.4);
     this.scene.add(o, sh);
     sh.visible = !this.space;
@@ -663,7 +694,7 @@ export class FlightMode {
     const tx = h.leave ? this.Xw + 10 : Math.min(this.Xw - 2, 5), ty = h.leave ? this.Yh + 6 : -this.Yh * 0.3 + Math.sin(h.t) * 1.2;
     h.x += (tx - h.x) * Math.min(1, dt * 1.5); h.y += (ty - h.y) * Math.min(1, dt * 1.5);
     this.wp(h.x, h.y, h.o.position);
-    h.o.rotation.y = screenYaw(-0.3 + Math.sin(h.t * 2) * 0.1);
+    h.o.rotation.y = this.chase ? Math.PI / 4 + Math.sin(h.t * 2) * 0.1 : screenYaw(-0.3 + Math.sin(h.t * 2) * 0.1);
     h.sh.position.set(h.o.position.x, 0.04, h.o.position.z);
     h.fireT -= dt;
     if (!h.leave && h.fireT <= 0) {
@@ -681,5 +712,6 @@ export class FlightMode {
     for (const d of this.decor) this.scene.remove(d);
     if (this.han) this.scene.remove(this.han.o, this.han.sh);
     this.scene.remove(this.obj, this.shadow);
+    if (this.chase) this.scene.fog = this.oldFog || null;
   }
 }
