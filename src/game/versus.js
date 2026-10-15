@@ -6,7 +6,7 @@
 // L'arène : la salle du trône, avec le public (les amis de Lucas d'un côté, les soldats de l'autre).
 // Repère : les combattants sont sur l'axe x (z = 0), le sol est à y = 0, la caméra regarde depuis +z.
 import * as THREE from 'three';
-import { Fighter, SaberTrail, KICK_POSES } from '../entities/fighter.js';
+import { Fighter, SaberTrail, KICK_POSES, makeSlash, updateSlash } from '../entities/fighter.js';
 import { canvasTex, glowSprite, toon } from '../engine/gfx.js';
 import { sfx } from '../engine/audio.js';
 import { rand, clamp, pick } from './common.js';
@@ -16,11 +16,11 @@ const _a = new THREE.Vector3(), _b = new THREE.Vector3();
 
 // les coups : animation, vitesse, moment où ça touche (0..1), portée, dégâts, recul, « fait tomber », élan
 const MOVES = {
-  atk1: { anim: 'atk1', speed: 1.8, hit: 0.42, reach: 2.4, dmg: 6, kb: 2.5 },
-  atk2: { anim: 'atk2', speed: 1.8, hit: 0.42, reach: 2.4, dmg: 6, kb: 2.5 },
-  atk3: { anim: 'spinFast', speed: 1.05, hit: 0.55, reach: 2.7, dmg: 10, kb: 7, knock: true, heavy: true },
-  lunge: { anim: 'stab', speed: 1.5, hit: 0.4, reach: 2.9, dmg: 9, kb: 5, dash: 8, heavy: true },
-  air: { anim: 'atk3', speed: 2.0, hit: 0.33, reach: 2.4, dmg: 8, kb: 5 },
+  atk1: { anim: 'atk1', speed: 1.6, hit: 0.45, reach: 2.5, dmg: 6, kb: 2.5, swing: 'diag' },
+  atk2: { anim: 'atk2', speed: 1.6, hit: 0.45, reach: 2.5, dmg: 6, kb: 2.5, swing: 'horiz' },
+  atk3: { anim: 'spinFast', speed: 1.05, hit: 0.55, reach: 2.8, dmg: 10, kb: 7, knock: true, heavy: true, swing: 'spin' },
+  lunge: { anim: 'stab', speed: 1.5, hit: 0.4, reach: 2.9, dmg: 9, kb: 5, dash: 8, heavy: true, swing: 'stab' },
+  air: { anim: 'atk3', speed: 2.0, hit: 0.33, reach: 2.5, dmg: 8, kb: 5, swing: 'chop' },
   kick: { anim: 'kick', speed: 1.7, hit: 0.42, reach: 2.0, dmg: 5, kb: 7 },
   // les coups de pied de Lucas (un au hasard à chaque fois)
   kSide: { anim: 'kick', speed: 1.5, hit: 0.45, reach: 2.7, dmg: 7, kb: 9, pose: 'side', word: 'PIED DE CÔTÉ !' },
@@ -28,8 +28,8 @@ const MOVES = {
   kLow: { anim: 'kick', speed: 1.6, hit: 0.45, reach: 2.5, dmg: 6, kb: 4, pose: 'low', knock: true, word: 'BALAYETTE !' },
   kSpin: { anim: 'kick', speed: 1.1, hit: 0.6, reach: 2.6, dmg: 9, kb: 10, pose: 'spin', spin: true, heavy: true, word: 'PIED RETOURNÉ !' },
   kFly: { anim: 'jumpAir', speed: 1, hit: 0.3, reach: 2.6, dmg: 8, kb: 7, pose: 'fly', air: true, word: 'PIED SAUTÉ !', len: 0.5 },
-  counter: { anim: 'counter', speed: 1.6, hit: 0.35, reach: 2.6, dmg: 8, kb: 6, heavy: true },
-  rheavy: { anim: 'bigChop', speed: 1.25, hit: 0.5, reach: 3.0, dmg: 11, kb: 8, dash: 4, knock: true, heavy: true },
+  counter: { anim: 'counter', speed: 1.6, hit: 0.35, reach: 2.6, dmg: 8, kb: 6, heavy: true, swing: 'horiz' },
+  rheavy: { anim: 'bigChop', speed: 1.25, hit: 0.5, reach: 3.0, dmg: 11, kb: 8, dash: 4, knock: true, heavy: true, swing: 'chop' },
 };
 
 const STAR_TEX = canvasTex(128, 128, (g) => {
@@ -57,7 +57,7 @@ export class VersusMode {
     this.oldBg = this.scene.background; this.oldFog = this.scene.fog;
     this.scene.background = new THREE.Color(0x120a1c);
     this.scene.fog = new THREE.Fog(0x120a1c, 40, 90);
-    this.fx = []; this.crowd = []; this.spots = []; this.waves = [];
+    this.fx = []; this.crowd = []; this.spots = []; this.waves = []; this.slashes = [];
     this.buildArena();
     this.cam3 = new THREE.PerspectiveCamera(40, ctx.aspect(), 0.1, 300);
     this.camPos = new THREE.Vector3(0, 9, 26);
@@ -323,6 +323,18 @@ export class VersusMode {
   pop(text, pos, color, size) { this.ctx.words.pop(text, pos, color, size * 0.55); }
 
   // ---------- des effets qui claquent ----------
+  // le grand arc de lumière d'un coup de sabre
+  slash(P, kind) {
+    const col = P === this.L ? new THREE.Color(P.f.saber.userData.trailColor).getHex() : 0xc070ff;
+    const g = makeSlash(col, kind);
+    g.position.set(P.x + P.face * (kind === 'spin' ? 0 : 0.6), P.y + 1.25, 0.35);
+    g.scale.x = P.face;
+    if (kind === 'horiz') g.userData.flat = true;
+    if (kind === 'stab') { g.scale.y = 0.25; g.userData.flat = true; }
+    this.root.add(g);
+    this.slashes.push(g);
+  }
+
   spark(pos, color, big) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: STAR_TEX, color, transparent: true, depthTest: false, blending: THREE.AdditiveBlending }));
     s.position.copy(pos); s.renderOrder = 15; s.material.rotation = rand(0, 3);
@@ -491,6 +503,7 @@ export class VersusMode {
       P.mt -= dt;
       if (P.move && P.move.reach && !P.move.done && P.mt <= P.move.len * (1 - P.move.hit)) {
         P.move.done = true;
+        if (P.move.swing) this.slash(P, P.move.swing);
         const dx = (O.x - P.x) * P.face;
         if (dx > -0.4 && dx < P.move.reach && Math.abs(O.y - P.y) < (P.move.high ? 3.2 : 1.9)) {
           if (this.hitBy(O, P, P.move.dmg, P.move.kb, { knock: P.move.knock, heavy: P.move.heavy }) && P.move.high && O.state !== 'ko') { O.vy = 7; O.y = Math.max(O.y, 0.01); }
@@ -558,12 +571,15 @@ export class VersusMode {
     }
     // les coups de pied : la jambe se lève (pose imposée) et le pied retourné fait un tour complet
     const M = P.state === 'attack' && P.move && P.move.pose ? P.move : null;
-    if (M) {
+    const SWM = P.state === 'attack' && P.move && P.move.swing && P.move.swing !== 'spin' && P.f.L ? P.move : null;
+    if (SWM) P.f.swingPose(SWM.swing, 1 - P.mt / P.move.len, SWM.hit);
+    else if (M) {
       const k = 1 - P.mt / P.move.len; // 0 → 1 pendant le coup
       const w = clamp(Math.min(k / 0.3, (1 - k) / 0.3), 0, 1);
       P.f.pose = { dirs: KICK_POSES[M.pose], w };
       if (M.spin) P.f.model.rotation.y = -P.face * Math.min(1, k / 0.6) * Math.PI * 2;
     } else if (P.f.pose) { P.f.pose = null; if (!P.flip) P.f.model.rotation.y = 0; }
+    if (!SWM && !M && P.f.pose) P.f.pose = null;
     if (P.f.footEnds(_a, _b)) P.footTrail.push(_a, _b, !!M);
     // la pirouette : il tourne sur lui-même en arrière, roulé en boule
     if (P.flip) {
@@ -762,6 +778,7 @@ export class VersusMode {
       if (k >= 1) { this.root.remove(e.s, e.ring); return false; }
       return true;
     });
+    this.slashes = this.slashes.filter((g) => { if (updateSlash(g, dt)) return true; this.root.remove(g); return false; });
     this.waves = this.waves.filter((w) => { // les ondes de la Force
       w.t += dt;
       if (w.t < 0) { w.o.visible = false; return true; }

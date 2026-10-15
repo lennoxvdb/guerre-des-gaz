@@ -257,6 +257,37 @@ const V3 = (x, y, z) => new THREE.Vector3(x, y, z).normalize();
 // les coups de pied : direction de chaque os (personnage qui regarde vers +z ; sa droite est vers -x)
 // (le sabre se lève en arrière pendant le coup de pied, pour bien voir la jambe)
 const SABER_BACK = { RightArm: V3(-0.75, 0.45, -0.45), RightForeArm: V3(-0.35, 0.9, -0.25), LeftArm: V3(0.55, 0.15, 0.8), LeftForeArm: V3(0.3, 0.3, 0.9), blade: V3(-0.2, 0.92, -0.35) };
+// les grands coups de sabre : le bras part de loin derrière (from), passe en haut (mid) et finit devant en bas (to)
+const SW = (RightArm, RightForeArm, blade) => ({ RightArm, RightForeArm, blade });
+export const SWINGS = {
+  diag: [SW(V3(-0.45, 0.8, -0.35), V3(-0.15, 0.95, -0.25), V3(-0.25, 0.55, -0.8)), SW(V3(-0.1, 0.85, 0.5), V3(0.1, 0.8, 0.6), V3(0.1, 0.9, 0.4)), SW(V3(0.25, -0.25, 0.93), V3(0.5, -0.4, 0.77), V3(0.55, -0.6, 0.55))],
+  horiz: [SW(V3(-0.95, 0.25, -0.2), V3(-0.75, 0.2, -0.6), V3(-0.5, 0.15, -0.85)), SW(V3(-0.4, 0.15, 0.9), V3(0, 0.1, 1), V3(-0.1, 0.1, 1)), SW(V3(0.45, 0.1, 0.9), V3(0.85, 0.05, 0.5), V3(0.95, 0.05, 0.2))],
+  chop: [SW(V3(-0.3, 0.9, -0.3), V3(-0.1, 0.95, -0.3), V3(0, 0.4, -0.9)), SW(V3(-0.2, 0.85, 0.45), V3(-0.1, 0.7, 0.7), V3(0, 0.85, 0.5)), SW(V3(-0.15, -0.2, 0.97), V3(-0.05, -0.45, 0.9), V3(0, -0.75, 0.65))],
+  stab: [SW(V3(-0.7, -0.2, -0.6), V3(-0.3, 0.1, -0.95), V3(0.1, 0.25, 0.96)), SW(V3(-0.5, 0, 0.85), V3(-0.2, 0.1, 0.98), V3(0.05, 0.15, 0.99)), SW(V3(-0.2, 0.05, 0.98), V3(0, 0.05, 1), V3(0, 0.1, 1))],
+};
+// l'arc de lumière d'un grand coup (un croissant qui s'élargit et s'efface), dans le plan x-y
+export function makeSlash(color, kind = 'diag') {
+  const g = new THREE.Group();
+  const span = kind === 'spin' ? Math.PI * 2 : kind === 'horiz' ? Math.PI * 1.1 : Math.PI * 0.95;
+  const start = kind === 'spin' ? 0 : kind === 'horiz' ? -span / 2 : kind === 'chop' ? -0.6 : -0.75;
+  const mk = (r0, r1, op, col) => new THREE.Mesh(new THREE.RingGeometry(r0, r1, 40, 1, start, span),
+    new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  g.add(mk(1.25, 2.5, 0.35, color), mk(2.15, 2.5, 0.9, 0xffffff), mk(1.9, 2.2, 0.6, color));
+  if (kind === 'horiz') g.scale.y = 0.45;
+  g.renderOrder = 12;
+  g.userData = { t: 0 };
+  return g;
+}
+// fait vivre un arc (renvoie false quand il a disparu)
+export function updateSlash(g, dt) {
+  g.userData.t += dt;
+  const k = g.userData.t / 0.26;
+  const s = 0.75 + k * 0.45;
+  g.scale.x = Math.sign(g.scale.x || 1) * s; g.scale.y = (g.userData.flat ? 0.45 : 1) * s;
+  for (const m of g.children) m.material.opacity = m.userData.op0 === undefined ? (m.userData.op0 = m.material.opacity) : m.userData.op0 * Math.max(0, 1 - k);
+  return k < 1;
+}
+
 export const KICK_POSES = {
   side: { ...SABER_BACK, RightUpLeg: V3(-0.2, 0.32, 0.93), RightLeg: V3(-0.15, 0.34, 0.93), Spine: V3(0.3, 0.82, -0.48), LeftUpLeg: V3(0.15, -1, -0.25) },
   high: { ...SABER_BACK, RightUpLeg: V3(-0.1, 0.82, 0.56), RightLeg: V3(-0.08, 0.96, 0.25), Spine: V3(0, 0.78, -0.62) },
@@ -465,6 +496,22 @@ export class Fighter {
     this.yaw += d * Math.min(1, dt * speed);
   }
 
+  // un grand geste de sabre : k = où on en est dans le coup (0..1), hk = le moment où ça touche
+  swingPose(kind, k, hk) {
+    if (!this.L || !SWINGS[kind]) return;
+    const [A, B, C] = SWINGS[kind];
+    const a = Math.max(0.06, hk - 0.2), b = hk + 0.05;
+    let w, t;
+    if (k < a) { w = k / a; t = 0; } else if (k < b) { w = 1; t = (k - a) / (b - a); } else if (k < 0.8) { w = 1; t = 1; } else { w = Math.max(0, (1 - k) / 0.2); t = 1; }
+    t = t * t * (3 - 2 * t);
+    const dirs = this._swing || (this._swing = {});
+    for (const n in A) {
+      const v = dirs[n] || (dirs[n] = new THREE.Vector3());
+      if (t < 0.5) v.copy(A[n]).lerp(B[n], t * 2); else v.copy(B[n]).lerp(C[n], t * 2 - 1);
+      v.normalize();
+    }
+    this.pose = { dirs, w };
+  }
   footEnds(base, tip) {
     if (!this.L) return false;
     this.L.knee = this.L.knee || this.L.lucas.getObjectByName('mixamorigRightLeg');

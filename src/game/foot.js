@@ -1,7 +1,7 @@
 // Le combat à pied au sabre-gaz : Lucas contre les soldats de Dark Roteur (et Dark Roteur lui-même).
 // Les vaisseaux ennemis passent au-dessus, bombardent (cercles rouges) et lâchent des soldats dans des bulles.
 import * as THREE from 'three';
-import { Fighter, SaberTrail, makeSaber } from '../entities/fighter.js';
+import { Fighter, SaberTrail, makeSaber, makeSlash, updateSlash } from '../entities/fighter.js';
 import { TEX, flatSprite, shadowBlob, warnDisc, glowSprite, standee } from '../engine/gfx.js';
 import { sfx } from '../engine/audio.js';
 import { SR, SU, rand, clamp, pick, wrapA, yawOf, dist2, HIT_WORDS, Script } from './common.js';
@@ -345,6 +345,13 @@ export class FootMode {
 
   swingHits() {
     const h = this.hero, fwd = this.heroFacing().clone();
+    // le grand arc de lumière, à plat devant Lucas (on le voit bien de dessus comme de derrière)
+    const kind = ['diag', 'horiz', 'chop'][h.stage] || 'diag';
+    const g = makeSlash(new THREE.Color(h.f.saber.userData.trailColor).getHex(), kind === 'chop' ? 'diag' : 'horiz');
+    g.rotation.order = 'YXZ'; g.rotation.set(-Math.PI / 2, h.f.yaw - Math.PI / 2, 0);
+    g.position.set(h.pos.x + fwd.x * 0.4, 1.1 + (this.jet ? this.lift : 0), h.pos.z + fwd.z * 0.4);
+    g.scale.y = 1; g.userData.flat = false;
+    this.scene.add(g); (this.slashes || (this.slashes = [])).push(g);
     const dmg = h.stage === 2 ? 2 : 1;
     for (const e of this.enemies) {
       if (e.dead || e.state === 'drop') continue;
@@ -553,9 +560,13 @@ export class FootMode {
     }
     // clignote quand il est invincible
     f.root.visible = h.inv <= 0 || Math.floor(this.t * 14) % 2 === 0;
+    // le grand geste du sabre pendant un coup
+    if (h.atkT > 0) f.swingPose(['diag', 'horiz', 'chop'][h.stage] || 'diag', 1 - h.atkT / h.atkLen, 1 - h.hitAt / h.atkLen);
+    else if (f.pose) f.pose = null;
     f.update(dt);
     f.saberEnds(_a, _b);
     this.trail.push(_a, _b, h.atkT > 0 || h.special > 0);
+    if (this.slashes) this.slashes = this.slashes.filter((g) => { if (updateSlash(g, dt)) return true; this.scene.remove(g); return false; });
   }
 
   collide(p, r) {
