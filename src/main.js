@@ -8,6 +8,7 @@ import { FootMode } from './game/foot.js';
 import { FlightMode, FLIGHT_OFF } from './game/flight.js';
 import { MISSIONS, DIFF } from './game/missions.js';
 import { SpeederMode } from './game/speeder.js';
+import { TrenchMode } from './game/trench.js';
 import { autoUpdate, appReady } from './engine/update.js';
 import { SABRE, loadSabre, saveSabre, makeCustomSaber, setSabreSink } from './entities/sabre.js';
 
@@ -122,7 +123,7 @@ gameEl.addEventListener('pointerdown', (e) => {
   unlock();
   if (state !== 'play' || paused || e.target.closest('button')) return;
   const p = local(e);
-  if (modeName === 'flight' || modeName === 'speeder') { drag = { id: e.pointerId, x: p.x, y: p.y }; $('flightHelp').classList.add('hidden'); return; }
+  if (modeName === 'flight' || modeName === 'speeder' || modeName === 'trench') { drag = { id: e.pointerId, x: p.x, y: p.y }; $('flightHelp').classList.add('hidden'); return; }
   if (joy.on || press) return;
   press = { id: e.pointerId, x: p.x, y: p.y, t: performance.now() };
 });
@@ -261,7 +262,7 @@ const ctx = {
   hitstop(t) { stopT = Math.max(stopT, t); },
   flash(a) { flash(a); },
   music(name) { playMusic(name); },
-  aspect, flightHalf,
+  aspect, flightHalf, gw: () => GW,
   dragScale: () => (camera.right - camera.left) / GW * 1.35,
 };
 
@@ -465,6 +466,11 @@ function startPart(part, carry = {}) {
     const startPos = carry.startPos || (world.wcSpot ? world.wcSpot.clone() : new THREE.Vector3());
     mode = new FlightMode(ctx, { script: m.flight.script, startPos, hp: carry.hp ?? DIFF.hp, mega: carry.mega ?? 0, skipIntro: carry.retry || !world.wcSpot });
     playMusic('flight');
+  } else if (part === 'trench') {
+    hud.classList.add('flight');
+    $('flightHelp').classList.toggle('hidden', !touchDevice);
+    mode = new TrenchMode(ctx, { hp: carry.hp ?? DIFF.hp, mega: carry.mega ?? 0 });
+    playMusic('flight');
   } else if (part === 'speeder') {
     hud.classList.add('flight', 'speeder');
     $('flightHelp').classList.toggle('hidden', !touchDevice);
@@ -477,6 +483,11 @@ function onResult(r) {
   if (r.type === 'board') {
     const hp = mode.hero.hp, mega = mode.hero.mega;
     startPart('flight', { startPos: world.wcSpot.clone(), hp, mega });
+    return;
+  }
+  if (r.type === 'next') { // la suite de la mission (ex. : de l'espace à la tranchée), avec les mêmes cœurs
+    const who = mode.ship || mode.hero || mode.player;
+    startPart(r.part, { hp: who.hp, mega: who.mega });
     return;
   }
   if (r.type === 'dead') return gameOver();
@@ -582,7 +593,7 @@ function frame(now) {
     ptr.classList.remove('hidden');
   } else ptr.classList.add('hidden');
 
-  renderer.render(scene, camera);
+  renderer.render(scene, mode && mode.cam3 ? mode.cam3 : camera); // la tranchée a sa caméra de cinéma
   requestAnimationFrame(frame);
 }
 
@@ -612,6 +623,7 @@ requestAnimationFrame(frame);
   if (q.has('vol')) startMission(MISSIONS[0], { retry: true, part: 'flight' });
   if (q.has('ventouse')) { startMission(MISSIONS[0], { retry: true, part: 'flight' }); mode.script = null; mode.boss(); }
   if (q.has('etoile')) { startMission(MISSIONS[4], { retry: true }); mode.script = null; mode.starBoss(); }
+  if (q.has('tranchee')) startMission(MISSIONS[4], { retry: true, part: 'trench' });
   if (q.has('bolide')) { startMission(MISSIONS[2], { retry: true }); mode.script = null; mode.boss(); }
 })();
 

@@ -275,3 +275,15 @@ body.phone #game.narrow #radio:not(.hidden) ~ #bossbar { top: 214px; }
 #atelier .chip.lock .ico, #atelier .chip.lock span { opacity: .6; }
 #atelier .row { display: flex; gap: 10px; justify-content: center; }
 #atelier .row .btn { font-size: 17px; padding: 9px 14px; }
+/* la visée de la tranchée */
+.trenchSight { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.trenchSight.hidden { display: none; }
+.trenchSight .ring { width: 120px; height: 120px; border-radius: 50%; border: 6px solid #ff4a3a; box-shadow: 0 0 0 3px var(--ink), inset 0 0 0 3px var(--ink); position: relative; animation: sightPulse .6s ease-in-out infinite alternate; }
+.trenchSight .ring::before, .trenchSight .ring::after { content: ''; position: absolute; background: #ff4a3a; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.trenchSight .ring::before { width: 4px; height: 150px; }
+.trenchSight .ring::after { width: 150px; height: 4px; }
+.trenchSight b { font-size: 24px; color: #fff; text-shadow: 0 2px 0 var(--ink), 0 0 6px var(--ink); }
+.trenchSight.good .ring { border-color: #8fff5a; }
+.trenchSight.good .ring::before, .trenchSight.good .ring::after { background: #8fff5a; }
+.trenchSight.good b::after { content: ' — MAINTENANT !'; color: #8fff5a; }
+@keyframes sightPulse { from { transform: scale(1); } to { transform: scale(1.08); } }

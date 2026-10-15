@@ -170,12 +170,12 @@ export const MISSIONS = [
     ],
   },
   {
-    id: 5, name: 'L\'attaque de l\'Étoile Puante', desc: 'Bataille dans l\'espace, puis vise le trou de la chasse d\'eau de la station !',
-    theme: 'espace', icon: 'assets/vaisseaux/etoile.webp', parts: ['flight'],
+    id: 5, name: 'L\'attaque de l\'Étoile Puante', desc: 'Bataille dans l\'espace, puis fonce dans la tranchée et tire dans le trou de la chasse d\'eau !',
+    theme: 'espace', icon: 'assets/vaisseaux/etoile.webp', parts: ['flight', 'trench'],
     flight: { script: flightStar },
     intro: [
       N('Dans l\'espace, la Rébellion du Rire attaque l\'Étoile Puante…'),
-      S('pqr', 'Le trou de la chasse d\'eau ne s\'ouvre que de temps en temps. Il faut viser à ce moment-là !'),
+      S('pqr', 'Il faut voler dans la tranchée de la station, jusqu\'au trou de la chasse d\'eau. Un seul bon tir, et PLOUF !'),
       S('hanpopo', 'Je te couvre, gamin ! Attention aux crottes de l\'espace !'),
     ],
     outro: [
@@ -326,10 +326,9 @@ export function* flightStar(f) {
   f.rotWave('kami', 4); f.asteroids(3); yield 3; f.rotWave('left', 5); yield 2; f.rotWave('right', 5); yield 3; yield f.clear();
   yield 1.5;
   hud.banner('L\'ÉTOILE PUANTE !', 2.5);
-  f.say('gazou', 'Le trou de la chasse d\'eau, vise. Quand il s\'ouvre seulement !', 4.5);
-  yield 1;
-  f.starBoss();
-  hud.objective('Vise le trou de la chasse d\'eau quand il s\'ouvre !');
+  f.say('hanpopo', 'Vas-y gamin, plonge dans la tranchée ! Moi, je m\'occupe des autres.', 4);
+  yield 3;
+  f.result = { type: 'next', part: 'trench' }; // la suite en 3D, derrière le vaisseau
 }
 
 // ---------- mission 6 : le cœur de l'Étoile Puante, et le duel final ----------
