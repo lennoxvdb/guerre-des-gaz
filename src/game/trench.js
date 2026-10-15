@@ -348,7 +348,7 @@ export class TrenchMode {
     // la tranchée défile : on ajoute des morceaux devant, on enlève ceux de derrière
     const front = this.segs.length ? this.segs[this.segs.length - 1].z0 - SEG : 0;
     if (front > this.z - 380) this.addSeg(front);
-    this.segs = this.segs.filter((s) => { if (s.z0 - SEG > this.z + 130) { this.root.remove(s.g); return false; } return true; });
+    this.segs = this.segs.filter((s) => { if (!this.free && s.z0 - SEG > this.z + 130) { this.root.remove(s.g); return false; } return true; });
     // ce que le scénario demande de placer devant
     if (this.mode !== 'calme' && this.mode !== 'fin') {
       while (this.genZ > this.z - 300) {
@@ -477,6 +477,10 @@ export class TrenchMode {
   // la grande surface de la station-toilettes (on la voit en remontant vers les étoiles)
   buildSurface() {
     const M = mats(), g = new THREE.Group();
+    // la tranchée continue loin derrière (sinon on voit une bande noire en remontant)
+    let back = Math.max(...this.segs.map((s) => s.z0));
+    while (back < this.z + 700) { back += SEG; this.addSeg(back); }
+    this.segs.sort((a, b) => b.z0 - a.z0);
     const tex = M.top.map.clone(); tex.repeat.set(110, 220); tex.needsUpdate = true;
     const mat = new THREE.MeshToonMaterial({ map: tex });
     for (const s of [-1, 1]) { // deux grandes moitiés, en laissant la tranchée ouverte au milieu
