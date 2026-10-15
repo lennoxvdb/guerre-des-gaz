@@ -239,8 +239,18 @@ const ANIMS = {
   stab: '1H_Melee_Attack_Stab', spin: '2H_Melee_Attack_Spin', heavy: '2H_Melee_Attack_Chop',
   hit: 'Hit_A', hit2: 'Hit_B', death: 'Death_A', cheer: 'Cheer', dodge: 'Dodge_Forward', jump: 'Jump_Full_Short', jumpAir: 'Jump_Idle', jumpLand: 'Jump_Land', fly: 'Jump_Idle', sit: 'Sit_Chair_Idle',
   aim: '1H_Ranged_Aiming', shoot: '1H_Ranged_Shoot', spell: 'Spellcast_Shoot', throw: 'Throw', interact: 'Interact',
+  // pour le duel
+  kick: 'Unarmed_Melee_Attack_Kick', punch: 'Unarmed_Melee_Attack_Punch_A', sweep: '2H_Melee_Attack_Slice', spinFast: '2H_Melee_Attack_Spinning',
+  counter: 'Block_Attack', dodgeBack: 'Dodge_Backward', dodgeFwd: 'Dodge_Forward', standUp: 'Lie_StandUp', walkBack: 'Walking_Backwards',
+  jumpStart: 'Jump_Start', raise: 'Spellcast_Raise', death2: 'Death_B', bigChop: '2H_Melee_Attack_Chop',
 };
-const LOOPS = new Set(['idle', 'run', 'walk', 'guard', 'block', 'aim', 'fly', 'sit']);
+const LOOPS = new Set(['idle', 'run', 'walk', 'guard', 'block', 'aim', 'fly', 'sit', 'walkBack']);
+// la garde au sabre (quand il pare) : bras droit devant, lame bien droite devant lui (dans le repère du personnage, il regarde vers +z)
+const GUARD = {
+  RightArm: new THREE.Vector3(-0.35, -0.55, 0.75).normalize(),
+  RightForeArm: new THREE.Vector3(0.6, 0.2, 0.78).normalize(),
+};
+const GUARD_BLADE = new THREE.Vector3(0.42, 0.86, 0.3).normalize();
 
 export class Fighter {
   constructor(kind, height) {
@@ -321,6 +331,7 @@ export class Fighter {
       this.act[n].setEffectiveWeight(this.w[n]);
     }
     this.mixer.update(dt);
+    this.guardW = (this.guardW || 0) + ((this.guard ? 1 : 0) - (this.guardW || 0)) * Math.min(1, dt * 14);
     this.root.rotation.y = this.yaw;
     if (this.L) this.followKnight();
     if (this.saber && this.saber.userData.anim) this.saber.userData.anim(dt);
@@ -356,7 +367,8 @@ export class Fighter {
       const qLA = corr.multiply(qL0);
       // les pieds : on les gardera à plat (les pieds du Knight sont minuscules et tournés autrement)
       const flat = ln === 'LeftFoot' || ln === 'RightFoot' ? { qL0: qL0.clone(), knee: K.parent } : null;
-      pairs.push({ K, L, qK0inv: qK0.invert(), qLA, flat });
+      const guard = GUARD[ln] && KC ? { rest: dir(K, KC), to: GUARD[ln] } : null;
+      pairs.push({ K, L, qK0inv: qK0.invert(), qLA, flat, guard });
     }
     const map = new Map(pairs.map((p) => [p.L, p]));
     const order = [];
@@ -404,6 +416,7 @@ export class Fighter {
         const qK = P.K.getWorldQuaternion(new THREE.Quaternion()).premultiply(_rootQi);
         let want = qK.multiply(P.qK0inv).multiply(P.qLA);
         if (P.flat) want = this.flatFoot(P, want);
+        if (P.guard && this.guardW > 0.001) want.slerp(new THREE.Quaternion().setFromUnitVectors(P.guard.rest, P.guard.to).multiply(P.qLA), this.guardW);
         b.quaternion.copy(parentQ.clone().invert().multiply(want));
         world.set(b, want);
       } else {
@@ -417,6 +430,14 @@ export class Fighter {
     _m2.copy(_m).multiply(L.hipsL.parent.matrixWorld).invert();
     L.hipsL.position.copy(_p.applyMatrix4(_m2));
     L.lucas.updateMatrixWorld(true);
+    // en garde : la lame se redresse bien devant lui
+    if (this.saber && this.gripQ) {
+      if (this.guardW > 0.001) {
+        const want = this.root.getWorldQuaternion(new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), GUARD_BLADE));
+        const local = this.lucasHand.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(want);
+        this.saber.quaternion.copy(this.gripQ).slerp(local, this.guardW);
+      } else this.saber.quaternion.copy(this.gripQ);
+    }
   }
 
   turnTo(yaw, dt, speed = 12) {
@@ -460,7 +481,7 @@ export class Fighter {
   replaceSaber(s) {
     if (this.saber && this.saber.parent) this.saber.parent.remove(this.saber);
     this.saber = s;
-    if (this.grip) { this.grip.decompose(s.position, s.quaternion, s.scale); this.lucasHand.add(s); } else this.hand.add(s);
+    if (this.grip) { this.grip.decompose(s.position, s.quaternion, s.scale); this.gripQ = s.quaternion.clone(); this.lucasHand.add(s); } else this.hand.add(s);
   }
   setSaberOn(k) {
     if (!this.saber) return;

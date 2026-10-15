@@ -290,41 +290,70 @@ body.phone #game.narrow #radio:not(.hidden) ~ #bossbar { top: 214px; }
 
 /* le duel à la Street Fighter */
 #hud.versus #controls, #hud.versus #hearts, #hud.versus #objective, #hud.versus #bossbar { display: none !important; }
+#hud.versus #radio { top: 124px !important; }
 #vs { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
-#vs .vsTop { position: absolute; top: 58px; left: 8px; right: 8px; display: flex; align-items: flex-start; gap: 6px; }
+#vs::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(10,5,20,.55)); pointer-events: none; }
+#vs.dark::before { background: rgba(10,5,20,.6); transition: background .2s; }
+#vs .vsTop { position: absolute; top: 56px; left: 8px; right: 8px; display: flex; align-items: flex-start; gap: 6px; }
 #vs .vsSide { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
 #vs .vsSide > div { flex: 1; min-width: 0; }
 #vs .vsSide.R { text-align: right; }
-#vs .vsSide img { width: 46px; height: 46px; border-radius: 50%; border: 3px solid var(--ink); background: #fff7e0; object-fit: cover; }
-#vs .vsSide b { font-size: 15px; color: #fff; text-shadow: 0 2px 0 var(--ink); }
-#vs .vsBar { height: 18px; border: 3px solid var(--ink); border-radius: 9px; background: #5a1a1a; overflow: hidden; }
-#vs .vsBar i { display: block; height: 100%; background: linear-gradient(180deg, #b8ff8a, #4fc23a); transition: width .15s; }
-#vs .R .vsBar { transform: scaleX(-1); }
-#vs .R .vsBar i { background: linear-gradient(180deg, #e2b8ff, #8a3fd0); }
-#vs .vsGauge { margin-top: 3px; height: 8px; width: 70%; border: 2px solid var(--ink); border-radius: 5px; background: #2a2232; overflow: hidden; }
-#vs .vsGauge i { display: block; height: 100%; background: #8fff5a; }
+#vs .vsSide img { width: 50px; height: 50px; border-radius: 12px; border: 3px solid var(--ink); background: #fff7e0; object-fit: cover; box-shadow: 0 3px 0 var(--ink); }
+#vs .vsSide b { font-size: 16px; color: #fff; text-shadow: 0 2px 0 var(--ink); letter-spacing: 1px; }
+#vs .vsBar { position: relative; height: 22px; border: 3px solid var(--ink); border-radius: 6px; background: #2a1020; overflow: hidden; box-shadow: 0 3px 0 var(--ink); transform: skewX(-12deg); }
+#vs .vsBar u, #vs .vsBar i { position: absolute; left: 0; top: 0; bottom: 0; }
+#vs .vsBar u { background: #ff4a3a; }
+#vs .vsBar i { background: linear-gradient(180deg, #e8ffb8, #8fff5a 45%, #3fa32a); }
+#vs .R .vsBar { transform: skewX(12deg) scaleX(-1); }
+#vs .R .vsBar i { background: linear-gradient(180deg, #f3dcff, #c38bff 45%, #7b3fa0); }
+#vs .vsGauge { position: relative; margin-top: 4px; height: 9px; width: 72%; border: 2px solid var(--ink); border-radius: 5px; background: #2a2232; overflow: hidden; }
+#vs .R .vsGauge { margin-left: auto; transform: scaleX(-1); }
+#vs .vsGauge i { display: block; height: 100%; background: linear-gradient(90deg, #6fd3ff, #8fff5a); }
+#vs .vsGauge em { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: var(--ink); }
 #vs .vsGauge.full { box-shadow: 0 0 10px #8fff5a; }
-#vs .pips { color: #ffd23f; font-size: 16px; text-shadow: 0 2px 0 var(--ink); }
-#vs .vsTime { font-size: 30px; color: #fff; min-width: 48px; text-align: center; text-shadow: 0 3px 0 var(--ink); background: rgba(27,16,38,.75); border: 3px solid var(--ink); border-radius: 12px; padding: 0 6px; }
-#vs .vsBanner { position: absolute; left: 0; right: 0; top: 34%; text-align: center; font-size: clamp(40px, 11vw, 84px); color: #ffd23f;
+#vs .vsGauge.full i { background: linear-gradient(90deg, #ffd23f, #8fff5a, #ffd23f); animation: sightPulse .4s ease-in-out infinite alternate; }
+#vs .pips { color: #ffd23f; font-size: 18px; text-shadow: 0 2px 0 var(--ink); }
+#vs .vsTime { font-size: 34px; color: #ffd23f; min-width: 56px; text-align: center; -webkit-text-stroke: 2px var(--ink); paint-order: stroke fill; text-shadow: 0 3px 0 var(--ink);
+  background: rgba(27,16,38,.85); border: 3px solid var(--ink); border-radius: 12px; padding: 2px 6px; box-shadow: 0 3px 0 var(--ink); }
+#vs .vsCombo { position: absolute; top: 34%; font-size: 22px; color: #fff; -webkit-text-stroke: 2px var(--ink); paint-order: stroke fill; text-shadow: 0 3px 0 var(--ink); animation: vsComboPop .3s ease-out; }
+#vs .vsCombo b { font-size: 44px; color: #ffd23f; display: block; line-height: 1; }
+#vs .vsCombo.L { left: 16px; } #vs .vsCombo.R { right: 16px; text-align: right; }
+#vs .vsCombo.hidden { display: none; }
+@keyframes vsComboPop { from { transform: scale(1.8) rotate(-8deg); } to { transform: scale(1) rotate(0); } }
+#vs .vsSplash { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 2vw; background: linear-gradient(100deg, rgba(79,194,58,.85) 0 49.5%, #1b1026 49.5% 50.5%, rgba(123,63,160,.88) 50.5%); }
+#vs .vsSplash.hidden { display: none; }
+#vs .vsSplash img { height: min(46vh, 300px); filter: drop-shadow(0 8px 0 rgba(0,0,0,.4)); }
+#vs .vsSplash img.a { animation: vsInL .5s ease-out; } #vs .vsSplash img.b { animation: vsInR .5s ease-out; }
+#vs .vsSplash b { font-size: clamp(60px, 16vw, 130px); color: #ffd23f; -webkit-text-stroke: 4px var(--ink); paint-order: stroke fill; text-shadow: 0 8px 0 var(--ink); animation: vsPop .5s .25s ease-out both; }
+@keyframes vsInL { from { transform: translateX(-60vw); } } @keyframes vsInR { from { transform: translateX(60vw); } }
+#vs .vsBanner { position: absolute; left: 0; right: 0; top: 33%; text-align: center; font-size: clamp(42px, 11vw, 92px); color: #ffd23f;
   -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 6px 0 var(--ink); animation: vsPop .35s ease-out; }
+#vs .vsBanner.fight { color: #8fff5a; } #vs .vsBanner.ko { color: #ff4a3a; font-size: clamp(60px, 16vw, 130px); }
+#vs .vsBanner.super { color: #8fff5a; text-shadow: 0 6px 0 var(--ink), 0 0 30px #8fff5a; }
+#vs .vsBanner.small { font-size: clamp(26px, 6vw, 46px); top: 24%; color: #fff; }
 #vs .vsBanner.hidden { display: none; }
-@keyframes vsPop { from { transform: scale(2.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes vsPop { from { transform: scale(2.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 #vs .vsPad { position: absolute; bottom: 14px; display: flex; gap: 10px; pointer-events: auto; align-items: flex-end; }
 #vs .vsPad.left { left: 12px; }
-#vs .vsPad.right { right: 12px; }
-#vs .vsPad button { width: 74px; height: 74px; border-radius: 50%; border: 4px solid var(--ink); background: rgba(255,247,224,.9); font: inherit; font-size: 30px;
+#vs .vsPad.right { right: 12px; display: grid; grid-template-columns: repeat(3, auto); grid-template-areas: "sp fo ki" "bl at at"; gap: 8px; align-items: end; }
+#vs .vsPad button { position: relative; overflow: hidden; width: 68px; height: 68px; border-radius: 50%; border: 4px solid var(--ink); background: rgba(255,247,224,.92); font: inherit; font-size: 28px;
   color: var(--ink); box-shadow: 0 5px 0 var(--ink); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; touch-action: none; user-select: none; }
-#vs .vsPad button b { font-size: 11px; }
+#vs .vsPad button b { font-size: 10px; position: relative; }
+#vs .vsPad button span { position: relative; }
 #vs .vsPad button.down { transform: translateY(4px); box-shadow: 0 1px 0 var(--ink); }
-#vs .vsPad .at { width: 92px; height: 92px; background: linear-gradient(180deg, #b8ff8a, #4fc23a); }
-#vs .vsPad .bl { background: linear-gradient(180deg, #8fd3ff, #3a7fd0); }
-#vs .vsPad .sp { opacity: .5; }
-#vs .vsPad .sp.ready { opacity: 1; background: linear-gradient(180deg, #d8ffb8, #8fff5a); animation: sightPulse .5s ease-in-out infinite alternate; }
-#vs .vsPad.left button { width: 70px; height: 70px; }
-#game.narrow #vs .vsPad button { width: 60px; height: 60px; font-size: 24px; }
-#game.narrow #vs .vsPad .at { width: 76px; height: 76px; }
-#game.narrow #vs .vsPad { gap: 6px; }
+#vs .vsPad .sp { grid-area: sp; opacity: .55; } #vs .vsPad .fo { grid-area: fo; } #vs .vsPad .ki { grid-area: ki; background: linear-gradient(180deg, #ffe08a, #ffb23f); }
+#vs .vsPad .bl { grid-area: bl; background: linear-gradient(180deg, #8fd3ff, #3a7fd0); }
+#vs .vsPad .at { grid-area: at; justify-self: end; width: 92px; height: 92px; background: linear-gradient(180deg, #b8ff8a, #4fc23a); font-size: 34px; }
+#vs .vsPad .sp.ready { opacity: 1; background: linear-gradient(180deg, #d8ffb8, #8fff5a); }
+#vs .vsPad .sp.mega { animation: sightPulse .4s ease-in-out infinite alternate; background: linear-gradient(180deg, #fff2a0, #ffd23f); }
+#vs .vsPad .fo { background: linear-gradient(180deg, #e8d8ff, #b38bff); }
+#vs .vsPad .fo i { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(27,16,38,.55); }
+#vs .vsPad .fo.ready { box-shadow: 0 5px 0 var(--ink), 0 0 14px #c38bff; }
+#vs .vsPad.left button { width: 66px; height: 66px; }
+#game.narrow #vs .vsPad button { width: 56px; height: 56px; font-size: 22px; }
+#game.narrow #vs .vsPad .at { width: 72px; height: 72px; }
+#game.narrow #vs .vsPad { gap: 5px; }
+#game.narrow #vs .vsPad.left { flex-direction: row; }
 #game.narrow #vs .vsSide img { width: 36px; height: 36px; }
-#game.narrow #vs .vsSide b { font-size: 12px; }
-#hud.versus #radio { top: 118px !important; }
+#game.narrow #vs .vsSide b { font-size: 11px; }
+#game.narrow #vs .vsTime { font-size: 24px; min-width: 40px; }

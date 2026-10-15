@@ -501,6 +501,7 @@ export class FootMode {
     const wantAtk = inp.attack || autoAtk;
     if (inp.jump && h.jumpCool <= 0 && h.special <= 0 && !h.cheer) { this.startJump(mag > 0.15 ? mv : null); return; }
     h.blocking = inp.block && h.atkT <= 0 && h.special <= 0 && !h.cheer;
+    f.guard = h.blocking; // le sabre bien droit devant lui
     let speed = this.jet ? 8.5 : 6.8;
     if (h.blocking) speed = 2.6;
     if (h.atkT > 0 || h.special > 0) speed = 1.2;

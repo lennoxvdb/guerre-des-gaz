@@ -213,6 +213,12 @@ export const sfx = {
     [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(t + i * 0.12, 0.25, f, f, 0.12, 'square', sfxBus, 0.005, 3000));
   },
   click() { if (ok('click', 0.05)) tone(now(), 0.05, 900, 1200, 0.06, 'triangle'); },
+  crowd() { // le public du duel : « OUAIIIS ! »
+    if (!ok('crowd', 0.9)) return;
+    const t = now();
+    noise(t, 1.1, 700, 0.8, 0.12, 'bandpass', sfxBus, 1100);
+    noise(t + 0.05, 0.9, 1500, 1.2, 0.06, 'bandpass', sfxBus, 2200);
+  },
 };
 
 // ---------- musique : de vrais morceaux d'orchestre (libres de droits CC0, voir assets/musique/LICENCE.txt) ----------
