@@ -336,7 +336,7 @@ function title() {
       <button class="btn big" id="playBtn">▶ JOUER</button>
       <div class="row" style="gap:10px"><button class="btn alt" id="sabreBtn">🔧 Ton sabre</button><button class="btn alt duelBtn" id="duelBtn">🥊 Duel</button></div>
     </div>
-    <div class="ver">${gameVersion ? 'Version ' + gameVersion + ' — ' : ''}dessins Gemini, Lucas 3D maison (TRELLIS + Mixamo), soldats KayKit (CC0)</div>`);
+    <div class="ver">${gameVersion ? 'Version ' + gameVersion : ''}</div>`);
   el.id = 'title';
   $('playBtn').onclick = () => { unlock(); sfx.click(); missionsScreen(); };
   titleShot = 'title';

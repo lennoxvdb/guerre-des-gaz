@@ -15,6 +15,7 @@ export function unlock() {
     const d = noiseBuf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     if (pendingSong) playMusic(pendingSong);
+    loadSamples();
   }
   if (ac.state === 'suspended') ac.resume();
 }
@@ -62,6 +63,35 @@ function fart(t, dur, f0, f1, peak, wobble = 28) {
   o.start(t); lfo.start(t); o.stop(t + dur + 0.05); lfo.stop(t + dur + 0.05);
 }
 
+// ---------- les vrais bruits de prout et de rot (enregistrés, libres de droits CC0, voir assets/sons/LICENCE.txt) ----------
+const SAMPLES = {
+  prout: ['prout1', 'prout2', 'prout3', 'prout4', 'prout5', 'prout6', 'prout7', 'prout8'],
+  megaprout: ['megaprout'],
+  rot: ['rot1', 'rot2'],
+};
+const buffers = {};
+let samplesLoading = false;
+function loadSamples() {
+  if (samplesLoading || !ac) return;
+  samplesLoading = true;
+  for (const list of Object.values(SAMPLES)) for (const n of list) {
+    fetch(`assets/sons/${n}.mp3`).then((r) => r.arrayBuffer()).then((b) => ac.decodeAudioData(b)).then((buf) => { buffers[n] = buf; }).catch(() => { /* on garde les sons fabriqués */ });
+  }
+}
+// joue un bruit enregistré au hasard dans le groupe ; rate = plus aigu (>1) ou plus grave (<1) ; renvoie false s'il n'est pas prêt
+function sample(group, { rate = 1, gain = 0.8, delay = 0 } = {}) {
+  if (!ac || muted) return false;
+  const ready = SAMPLES[group].filter((n) => buffers[n]);
+  if (!ready.length) return false;
+  const s = ac.createBufferSource();
+  s.buffer = buffers[ready[Math.floor(Math.random() * ready.length)]];
+  s.playbackRate.value = rate * (0.92 + Math.random() * 0.16);
+  const g = ac.createGain(); g.gain.value = gain;
+  s.connect(g); g.connect(sfxBus);
+  s.start(now() + delay);
+  return true;
+}
+
 const last = {};
 const ok = (n, gap) => {
   if (!ac || muted) return false;
@@ -78,8 +108,8 @@ export const sfx = {
   swing(k = 1, voice = saberVoice) { // « vvwoomm » du sabre
     if (!ok('swing', 0.06)) return;
     const t = now();
-    if (voice === 'prout') { fart(t, 0.32, 150 * k, 80 * k, 0.24, 26); noise(t, 0.25, 300, 2, 0.08, 'bandpass', sfxBus, 900); return; }
-    if (voice === 'rot') { fart(t, 0.34, 110 * k, 70 * k, 0.26, 12); return; }
+    if (voice === 'prout') { if (!sample('prout', { rate: 1.15 * k, gain: 0.6 })) { fart(t, 0.32, 150 * k, 80 * k, 0.24, 26); noise(t, 0.25, 300, 2, 0.08, 'bandpass', sfxBus, 900); } return; }
+    if (voice === 'rot') { if (!sample('rot', { rate: 1.1 * k, gain: 0.6 })) fart(t, 0.34, 110 * k, 70 * k, 0.26, 12); return; }
     if (voice === 'pouet') { tone(t, 0.22, 520 * k, 390 * k, 0.1, 'square', sfxBus, 0.01, 2600); tone(t, 0.22, 780 * k, 585 * k, 0.05, 'square', sfxBus, 0.01, 2600); return; }
     if (voice === 'bulle') { tone(t, 0.16, 260 * k, 1100 * k, 0.16, 'sine'); tone(t + 0.07, 0.12, 420 * k, 1500 * k, 0.1, 'sine'); return; }
     noise(t, 0.28, 400 * k, 2, 0.22, 'bandpass', sfxBus, 2200 * k);
@@ -88,8 +118,8 @@ export const sfx = {
   ignite(voice = saberVoice) {
     if (!ok('ignite', 0.3)) return;
     const t = now();
-    if (voice === 'prout') { fart(t, 0.7, 90, 220, 0.3, 24); return; }
-    if (voice === 'rot') { fart(t, 0.7, 70, 140, 0.32, 10); return; }
+    if (voice === 'prout') { if (!sample('prout', { gain: 0.8 })) fart(t, 0.7, 90, 220, 0.3, 24); return; }
+    if (voice === 'rot') { if (!sample('rot', { gain: 0.8 })) fart(t, 0.7, 70, 140, 0.32, 10); return; }
     if (voice === 'pouet') { tone(t, 0.18, 392, 392, 0.1, 'square', sfxBus, 0.01, 2600); tone(t + 0.18, 0.35, 523, 523, 0.1, 'square', sfxBus, 0.01, 2600); return; }
     if (voice === 'bulle') { for (let i = 0; i < 4; i++) tone(t + i * 0.08, 0.1, 300 + i * 150, 1200 + i * 200, 0.12, 'sine'); return; }
     tone(t, 0.5, 70, 240, 0.18, 'sawtooth', sfxBus, 0.02, 1200);
@@ -126,6 +156,7 @@ export const sfx = {
   deflate() { // il se dégonfle en partant : pfffiouuu
     if (!ok('deflate', 0.05)) return;
     const t = now();
+    if (sample('prout', { rate: 1.5, gain: 0.55 })) { tone(t, 0.6, 900, 1900, 0.03, 'sine'); return; }
     fart(t, 0.6, 320 + Math.random() * 120, 90, 0.2, 30 + Math.random() * 15);
     tone(t, 0.6, 900, 1900, 0.04, 'sine');
   },
@@ -138,17 +169,20 @@ export const sfx = {
   hurt() { // Lucas touché : un rot
     if (!ok('hurt', 0.2)) return;
     const t = now();
+    if (sample('rot', { rate: 1.35, gain: 0.7 })) return;
     fart(t, 0.45, 120, 60, 0.32, 14);
   },
   burp() { // le gros rot de Dark Roteur
     if (!ok('burp', 0.3)) return;
     const t = now();
+    if (sample('rot', { rate: 0.7, gain: 1 })) return;
     fart(t, 1.1, 95, 45, 0.5, 11);
     noise(t, 0.9, 280, 2, 0.15);
   },
   mega() { // le Méga-Prout
     if (!ok('mega', 0.3)) return;
     const t = now();
+    if (sample('megaprout', { rate: 0.85, gain: 1 })) { tone(t, 1.2, 60, 30, 0.25, 'sine'); return; }
     fart(t, 1.4, 200, 40, 0.5, 22);
     noise(t, 1.2, 250, 1.2, 0.2);
     tone(t, 1.2, 60, 30, 0.3, 'sine');
@@ -167,6 +201,7 @@ export const sfx = {
   jump() { // propulsé par un prout
     if (!ok('jump', 0.2)) return;
     const t = now();
+    if (sample('prout', { rate: 1.3, gain: 0.6 })) { noise(t, 0.3, 500, 1.5, 0.08, 'bandpass', sfxBus, 2500); return; }
     fart(t, 0.35, 260, 120, 0.3, 32);
     noise(t, 0.4, 500, 1.5, 0.15, 'bandpass', sfxBus, 2500);
   },
