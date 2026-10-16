@@ -31,7 +31,7 @@ export async function loadKnight() {
 }
 // nos personnages faits maison : dessin Gemini → TRELLIS → squelette Mixamo (voir CLAUDE.md)
 // Pour en ajouter un : déposer son .fbx dans assets/3d/ et l'écrire ici.
-const MODELS = { lucas: 'assets/3d/lucas.fbx' };
+const MODELS = { lucas: 'assets/3d/lucas.fbx', roteur: 'assets/3d/roteur.fbx' };
 const SRC = {};
 
 // les os du Knight → les os de Mixamo (et l'os « enfant » qui donne la direction de chaque os)
@@ -317,6 +317,7 @@ export class Fighter {
       this.saber = null;
       // Lucas : le sabre fabriqué dans l'atelier ; Dark Roteur : son sabre violet ; bien serrés dans la main
       this.replaceSaber(kind === 'lucas' ? makeCustomSaber() : makeSaber(0xb04cff, 0xf3dcff));
+      if (kind === 'roteur') this.saber.scale.multiplyScalar(1.4); // un grand sabre pour un grand méchant
     } else if (kind === 'lucas') {
       const hair = lucasHair(); hair.position.set(0, 0.12, -0.05); head.add(hair);
       this.saber = makeCustomSaber(); // le sabre fabriqué dans l'atelier
