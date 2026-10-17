@@ -60,7 +60,8 @@ export function makePoop(size = 2.6) {
 // Le réservoir devant, les 4 moteurs verts derrière (on les voit depuis la caméra).
 // Lucas est assis sur la lunette, protégé par une bulle verte transparente (un champ de force).
 // S'il ne charge pas, on garde l'ancien vaisseau fait de formes simples.
-const SHIP_K = 6.4; // le modèle fait 1 de large : on le met à la taille du jeu
+const SHIP_K = 3.0; // le modèle fait 1 de large ; petit, pour que Lucas soit à la taille d'un vrai enfant sur de vraies toilettes
+const PILOT_H = 2.4; // la taille de Lucas
 const DOME = { y: -0.14, top: 0.025, z: 0.2 }; // la bulle peinte du cockpit (dans le modèle) : on l'enlève
 const SEAT = { y: 0.055, z: 0.045 }; // le dessus de la lunette, là où Lucas s'assoit
 let SHIP = null;
@@ -80,7 +81,7 @@ export async function loadShip() {
     geo.computeVertexNormals();
     const map = mesh.material.map;
     if (map) map.colorSpace = THREE.SRGBColorSpace;
-    const outline = outlineGeo(geo, 0.05);
+    const outline = outlineGeo(geo, 0.03);
     geo.userData.keep = outline.userData.keep = true;
     SHIP = { geo, outline, mat: new THREE.MeshToonMaterial({ map, gradientMap: gradMap, side: THREE.DoubleSide }) }; // les deux faces : pas de trou là où était la bulle
   } catch (e) { console.warn('chasseur-WC 3D introuvable, on garde l\'ancien', e); }
@@ -115,17 +116,19 @@ function makeShip3D() {
   const body = new THREE.Mesh(SHIP.geo, SHIP.mat); body.castShadow = true;
   g.add(body, new THREE.Mesh(SHIP.outline, outlineMat));
   const shield = new THREE.Mesh(shieldGeo, shieldMat);
-  shield.scale.set(1.75, 1.85, 1.75); shield.position.set(0, SEAT.y * K + 0.95, SEAT.z * K + 0.35); shield.renderOrder = 3;
+  const H = PILOT_H;
+  shield.scale.setScalar(H * 0.72); shield.position.set(0, SEAT.y * K + H * 0.32, SEAT.z * K + H * 0.12); shield.renderOrder = 3;
   shield.onBeforeRender = tickShield;
   g.add(shield);
   // les flammes vertes au bout des 4 moteurs
   for (const [x, y, z] of [[-0.445, -0.15, 0.095], [0.445, -0.15, 0.095], [-0.445, 0.148, 0.03], [0.445, 0.148, 0.03]]) {
-    const fire = glowSprite(0x7dff4a, 1.5, 0.9); fire.position.set(x * K, y * K, z * K); g.add(fire);
+    const fire = glowSprite(0x7dff4a, K * 0.3, 0.9); fire.position.set(x * K, y * K, z * K); g.add(fire);
   }
   // Lucas assis sur la lunette comme sur de vrais WC : le dos au réservoir, il nous regarde
-  const lucas = new Fighter('lucas', 2.1);
+  const lucas = new Fighter('lucas', H);
   lucas.setBase('sit'); lucas.setSaberOn(0);
-  lucas.yaw = 0; lucas.root.position.set(0, SEAT.y * K - 0.62, SEAT.z * K + 0.88); // ses fesses (hanches) pile sur la lunette
+  lucas.yaw = 0; // dans la pose assise, ses hanches sont à 0,51 × sa taille au-dessus de ses pieds et 0,42 × sa taille en arrière
+  lucas.root.position.set(0, SEAT.y * K - H * 0.44, SEAT.z * K + H * 0.42); // ses fesses pile sur la lunette
   lucas.update(0.01);
   g.add(lucas.root);
   g.userData.lucas = lucas;
@@ -427,7 +430,7 @@ export class TrenchMode {
       if (this.guns && p.fireT <= 0) {
         p.fireT = 0.2;
         for (const s of [-1, 1]) {
-          const x = p.x + s * 2.6, y = p.y + 0.3, z = this.z - 1;
+          const x = p.x + s * (SHIP ? 0.445 * SHIP_K : 2.6), y = p.y + 0.3, z = this.z - 1;
           if (tg) { // visée automatique : un enfant n'a pas à viser au millimètre
             const d = new THREE.Vector3(tg.x - x, tg.y - y, tg.z - z).normalize().multiplyScalar(110);
             this.shoot(x, y, z, d.x, d.y, d.z, false);
@@ -561,7 +564,8 @@ export class TrenchMode {
     const p = this.ship;
     // caméra « de face » pendant que Dark Roteur nous poursuit : on le voit derrière Lucas
     const back = this.camBack;
-    const want = back ? new THREE.Vector3(p.x + 4, p.y + (this.free ? 7 : 2.2), this.z - 12) : new THREE.Vector3(p.x * 0.55, p.y + 2.3, this.z + 8.5);
+    const near = SHIP ? 0.72 : 1; // notre petit chasseur-WC 3D : la caméra se rapproche pour bien voir Lucas
+    const want = back ? new THREE.Vector3(p.x + 4 * near, p.y + (this.free ? 7 : 2.2 * near), this.z - 12 * near) : new THREE.Vector3(p.x * 0.55, p.y + 2.3 * near, this.z + 8.5 * near);
     this.camPos.lerp(want, Math.min(1, dt * (back ? 2.5 : 5)));
     this.camPos.z = Math.min(Math.max(this.camPos.z, want.z - 3), want.z + 3); // elle ne se laisse pas distancer
     this.cam3.position.copy(this.camPos);

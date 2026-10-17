@@ -47,7 +47,7 @@ export class FlightMode {
     this.chase = !!opts.chase;
     this.obj = this.chase ? makeWcFighter() : flatSprite(TEX.wc, 2.6);
     if (this.chase) {
-      this.obj.scale.setScalar(0.8);
+      this.obj.scale.setScalar(0.9);
       this.cam3 = new THREE.PerspectiveCamera(58, ctx.aspect(), 0.1, 500);
       this.oldFog = this.scene.fog;
       this.scene.fog = new THREE.Fog(this.world.T.sky, 60, 170);
