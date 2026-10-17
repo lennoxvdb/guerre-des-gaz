@@ -8,7 +8,7 @@ import { FootMode } from './game/foot.js';
 import { FlightMode, FLIGHT_OFF } from './game/flight.js';
 import { MISSIONS, DIFF, DUEL } from './game/missions.js';
 import { SpeederMode } from './game/speeder.js';
-import { TrenchMode } from './game/trench.js';
+import { TrenchMode, loadShip } from './game/trench.js';
 import { VersusMode } from './game/versus.js';
 import { autoUpdate, appReady } from './engine/update.js';
 import { SABRE, loadSabre, saveSabre, makeCustomSaber, setSabreSink } from './entities/sabre.js';
@@ -709,6 +709,7 @@ requestAnimationFrame(frame);
   await Promise.all([
     loadTextures(IMAGES, (k) => { a = k; prog(); }),
     loadKnight().then(() => { b = 1; prog(); }),
+    loadShip(),
     document.fonts ? document.fonts.load('40px "Luckiest Guy"') : null,
   ]);
   $('loading').classList.add('hidden');

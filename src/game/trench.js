@@ -5,7 +5,8 @@
 // Repère : le vaisseau avance vers -z ; x = gauche/droite dans la tranchée, y = hauteur (le fond est à 0).
 import * as THREE from 'three';
 import { Fighter } from '../entities/fighter.js';
-import { canvasTex, glowSprite, toon, toonMat, outlineGeo, outlineMat, autoDispose, mergeStatic } from '../engine/gfx.js';
+import { canvasTex, glowSprite, toon, toonMat, outlineGeo, outlineMat, autoDispose, mergeStatic, gradMap } from '../engine/gfx.js';
+import { GLTFLoader } from '../../lib/GLTFLoader.js';
 import { sfx } from '../engine/audio.js';
 import { rand, clamp, pick, Script } from './common.js';
 
@@ -55,7 +56,59 @@ export function makePoop(size = 2.6) {
 
 // ---------- les vaisseaux en 3D ----------
 // le chasseur-WC : une cuvette volante avec son réservoir, sa lunette, et quatre ailes en X
+// ---------- notre chasseur-WC en vraie 3D (dessin Gemini → TRELLIS, assets/3d/chasseur.glb) ----------
+// Le réservoir devant, la bulle du cockpit et les 4 moteurs verts derrière (on les voit depuis la caméra).
+// S'il ne charge pas, on garde l'ancien vaisseau fait de formes simples.
+const SHIP_K = 6.4; // le modèle fait 1 de large : on le met à la taille du jeu
+const DOME = { y: -0.075, z: 0.285, r: 0.135 }; // la bulle du cockpit (dans le modèle)
+let SHIP = null;
+export async function loadShip() {
+  try {
+    const gl = await new GLTFLoader().loadAsync('assets/3d/chasseur.glb');
+    let mesh = null;
+    gl.scene.updateMatrixWorld(true);
+    gl.scene.traverse((o) => { if (o.isMesh) mesh = o; });
+    const geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+    // on enlève la bulle peinte (pas transparente) : une vraie bulle de verre la remplace, avec Lucas dedans
+    const pos = geo.attributes.position, idx = geo.index.array, keep = [];
+    const inDome = (i) => pos.getZ(i) > 0.215 && pos.getY(i) > DOME.y && Math.abs(pos.getX(i)) < 0.15;
+    for (let t = 0; t < idx.length; t += 3) if (!(inDome(idx[t]) && inDome(idx[t + 1]) && inDome(idx[t + 2]))) keep.push(idx[t], idx[t + 1], idx[t + 2]);
+    geo.setIndex(keep);
+    geo.scale(SHIP_K, SHIP_K, SHIP_K);
+    geo.computeVertexNormals();
+    const map = mesh.material.map;
+    if (map) map.colorSpace = THREE.SRGBColorSpace;
+    const outline = outlineGeo(geo, 0.05);
+    geo.userData.keep = outline.userData.keep = true;
+    SHIP = { geo, outline, mat: new THREE.MeshToonMaterial({ map, gradientMap: gradMap }) };
+  } catch (e) { console.warn('chasseur-WC 3D introuvable, on garde l\'ancien', e); }
+}
+const glassGeo = new THREE.SphereGeometry(1, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+glassGeo.userData.keep = true;
+const glassMat = new THREE.MeshBasicMaterial({ color: 0xbfeeff, transparent: true, opacity: 0.22, depthWrite: false });
+function makeShip3D() {
+  const g = new THREE.Group(), K = SHIP_K;
+  const body = new THREE.Mesh(SHIP.geo, SHIP.mat); body.castShadow = true;
+  g.add(body, new THREE.Mesh(SHIP.outline, outlineMat));
+  const glass = new THREE.Mesh(glassGeo, glassMat);
+  glass.scale.setScalar(DOME.r * K); glass.position.set(0, DOME.y * K, DOME.z * K); glass.renderOrder = 2;
+  g.add(glass);
+  // les flammes vertes au bout des 4 moteurs
+  for (const [x, y, z] of [[-0.445, -0.15, 0.095], [0.445, -0.15, 0.095], [-0.445, 0.148, 0.03], [0.445, 0.148, 0.03]]) {
+    const fire = glowSprite(0x7dff4a, 1.5, 0.9); fire.position.set(x * K, y * K, z * K); g.add(fire);
+  }
+  // Lucas assis dans la bulle, il regarde devant (vers le réservoir)
+  const lucas = new Fighter('lucas', 1.05);
+  lucas.setBase('sit'); lucas.setSaberOn(0);
+  lucas.yaw = Math.PI; lucas.root.position.set(0, DOME.y * K - 0.22, DOME.z * K + 0.05);
+  lucas.update(0.01);
+  g.add(lucas.root);
+  g.userData.lucas = lucas;
+  return g;
+}
+
 export function makeWcFighter() {
+  if (SHIP) return makeShip3D();
   const g = new THREE.Group();
   const C = (a, b, h, n = 16) => new THREE.CylinderGeometry(a, b, h, n);
   g.add(part(new THREE.CapsuleGeometry(0.62, 2.6, 6, 16).rotateX(Math.PI / 2), 0xf6f7f2, 0, 0, 0));
