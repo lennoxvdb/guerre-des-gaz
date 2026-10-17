@@ -57,8 +57,8 @@ export function makePoop(size = 2.6) {
 // ---------- les vaisseaux en 3D ----------
 // le chasseur-WC : une cuvette volante avec son réservoir, sa lunette, et quatre ailes en X
 // ---------- notre chasseur-WC en vraie 3D (dessin Gemini → TRELLIS, assets/3d/chasseur.glb) ----------
-// Le réservoir devant, les 4 moteurs verts derrière (on les voit depuis la caméra).
-// Lucas est assis sur la lunette, protégé par une bulle verte transparente (un champ de force).
+// La cuvette devant, le réservoir derrière : Lucas assis sur la lunette regarde devant lui (on le voit de dos),
+// protégé par une bulle verte transparente (un champ de force). Les flammes des 4 moteurs sortent vers nous.
 // S'il ne charge pas, on garde l'ancien vaisseau fait de formes simples.
 const SHIP_K = 3.0; // le modèle fait 1 de large ; petit, pour que Lucas soit à la taille d'un vrai enfant sur de vraies toilettes
 const PILOT_H = 2.4; // la taille de Lucas
@@ -78,6 +78,7 @@ export async function loadShip() {
     for (let t = 0; t < idx.length; t += 3) if (!(inDome(idx[t]) && inDome(idx[t + 1]) && inDome(idx[t + 2]))) keep.push(idx[t], idx[t + 1], idx[t + 2]);
     geo.setIndex(keep);
     geo.scale(SHIP_K, SHIP_K, SHIP_K);
+    geo.rotateY(Math.PI); // retourné : le nez (la cuvette) vers l'avant du jeu (-z), le réservoir derrière
     geo.computeVertexNormals();
     const map = mesh.material.map;
     if (map) map.colorSpace = THREE.SRGBColorSpace;
@@ -117,18 +118,18 @@ function makeShip3D() {
   g.add(body, new THREE.Mesh(SHIP.outline, outlineMat));
   const shield = new THREE.Mesh(shieldGeo, shieldMat);
   const H = PILOT_H;
-  shield.scale.setScalar(H * 0.72); shield.position.set(0, SEAT.y * K + H * 0.32, SEAT.z * K + H * 0.12); shield.renderOrder = 3;
+  shield.scale.setScalar(H * 0.72); shield.position.set(0, SEAT.y * K + H * 0.32, -SEAT.z * K - H * 0.12); shield.renderOrder = 3;
   shield.onBeforeRender = tickShield;
   g.add(shield);
-  // les flammes vertes au bout des 4 moteurs
-  for (const [x, y, z] of [[-0.445, -0.15, 0.095], [0.445, -0.15, 0.095], [-0.445, 0.148, 0.03], [0.445, 0.148, 0.03]]) {
+  // les flammes vertes à l'arrière des 4 moteurs (côté caméra)
+  for (const [x, y, z] of [[-0.445, -0.15, 0.16], [0.445, -0.15, 0.16], [-0.445, 0.148, 0.21], [0.445, 0.148, 0.21]]) {
     const fire = glowSprite(0x7dff4a, K * 0.3, 0.9); fire.position.set(x * K, y * K, z * K); g.add(fire);
   }
-  // Lucas assis sur la lunette comme sur de vrais WC : le dos au réservoir, il nous regarde
+  // Lucas assis sur la lunette comme sur de vrais WC : le dos au réservoir, il regarde devant (on le voit de dos)
   const lucas = new Fighter('lucas', H);
   lucas.setBase('sit'); lucas.setSaberOn(0);
-  lucas.yaw = 0; // dans la pose assise, ses hanches sont à 0,51 × sa taille au-dessus de ses pieds et 0,42 × sa taille en arrière
-  lucas.root.position.set(0, SEAT.y * K - H * 0.44, SEAT.z * K + H * 0.42); // ses fesses pile sur la lunette
+  lucas.yaw = Math.PI; // dans la pose assise, ses hanches sont à 0,51 × sa taille au-dessus de ses pieds et 0,42 × sa taille en arrière
+  lucas.root.position.set(0, SEAT.y * K - H * 0.44, -SEAT.z * K - H * 0.42); // ses fesses pile sur la lunette
   lucas.update(0.01);
   g.add(lucas.root);
   g.userData.lucas = lucas;
@@ -314,7 +315,7 @@ export class TrenchMode {
   addFlyer(big = false) {
     const o = makeRotFighter(big);
     this.scene.add(o);
-    const e = { o, big, x: rand(-W, W), y: H + rand(3, 6), dz: big ? 16 : -rand(10, 22), ph: rand(0, 6), fireT: rand(1, 2), t: 0, dead: false, hp: 3 };
+    const e = { o, big, x: rand(-W, W), y: H + rand(3, 6), dz: big ? 16 : -rand(16, 28), ph: rand(0, 6), fireT: rand(1, 2), t: 0, dead: false, hp: 3 };
     if (big) { e.x = 0; e.y = H + 6; }
     this.flyers.push(e);
     return e;
@@ -506,7 +507,7 @@ export class TrenchMode {
         return true;
       }
       if (e.big) { // Dark Roteur : derrière nous, il se rapproche
-        e.dz += ((this.roteurNear ? 9 : 16) - e.dz) * Math.min(1, dt * 0.8);
+        e.dz += ((this.roteurNear ? 12 : 18) - e.dz) * Math.min(1, dt * 0.8);
         e.x += (p.x - e.x) * Math.min(1, dt * 1.5); e.y = H + 3.5 + Math.sin(e.t * 2) * 0.5;
       } else {
         e.dz += ((-14 + Math.sin(e.t * 0.7 + e.ph) * 6) - e.dz) * Math.min(1, dt);
@@ -564,7 +565,7 @@ export class TrenchMode {
     const p = this.ship;
     // caméra « de face » pendant que Dark Roteur nous poursuit : on le voit derrière Lucas
     const back = this.camBack;
-    const near = SHIP ? 0.72 : 1; // notre petit chasseur-WC 3D : la caméra se rapproche pour bien voir Lucas
+    const near = SHIP ? 0.85 : 1; // notre petit chasseur-WC 3D : la caméra se rapproche pour bien voir Lucas
     const want = back ? new THREE.Vector3(p.x + 4 * near, p.y + (this.free ? 7 : 2.2 * near), this.z - 12 * near) : new THREE.Vector3(p.x * 0.55, p.y + 2.3 * near, this.z + 8.5 * near);
     this.camPos.lerp(want, Math.min(1, dt * (back ? 2.5 : 5)));
     this.camPos.z = Math.min(Math.max(this.camPos.z, want.z - 3), want.z + 3); // elle ne se laisse pas distancer

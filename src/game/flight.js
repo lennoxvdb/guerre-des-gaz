@@ -705,7 +705,7 @@ export class FlightMode {
   // le Faucon Pétulant de Han Popo aide au début du vol
   addHan() {
     const o = this.chase ? makeFaucon() : flatSprite(TEX.faucon, 3.6);
-    if (this.chase) o.scale.setScalar(0.7);
+    if (this.chase) o.scale.setScalar(0.55);
     const sh = shadowBlob(3.4);
     this.scene.add(o, sh);
     sh.visible = !this.space;
@@ -713,7 +713,11 @@ export class FlightMode {
   }
   updateHan(dt) {
     const h = this.han; h.t += dt;
-    const tx = h.leave ? this.Xw + 10 : Math.min(this.Xw - 2, 5), ty = h.leave ? this.Yh + 6 : -this.Yh * 0.3 + Math.sin(h.t) * 1.2;
+    // il vole toujours à bonne distance de Lucas : du côté où il y a de la place, un peu devant
+    const p = this.ship;
+    if (h.side === undefined || Math.abs(p.x - h.x) < 4) h.side = p.x > 0 ? -1 : 1;
+    const tx = h.leave ? this.Xw + 10 : clamp(p.x + h.side * 8, -this.Xw + 1.5, this.Xw - 1.5);
+    const ty = h.leave ? this.Yh + 6 : clamp(p.y + 4.5, -this.Yh * 0.4, this.Yh * 0.4) + Math.sin(h.t) * 1.0;
     h.x += (tx - h.x) * Math.min(1, dt * 1.5); h.y += (ty - h.y) * Math.min(1, dt * 1.5);
     this.wp(h.x, h.y, h.o.position);
     h.o.rotation.y = this.chase ? Math.PI / 4 + Math.sin(h.t * 2) * 0.1 : screenYaw(-0.3 + Math.sin(h.t * 2) * 0.1);
