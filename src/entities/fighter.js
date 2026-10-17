@@ -252,7 +252,7 @@ const GUARD = {
 };
 const GUARD_BLADE = new THREE.Vector3(0.42, 0.86, 0.3).normalize();
 // les os qu'on peut placer à la main (pour les coups de pied du duel)
-const POSE_BONES = ['RightArm', 'RightForeArm', 'LeftArm', 'LeftForeArm', 'RightUpLeg', 'RightLeg', 'LeftUpLeg', 'LeftLeg', 'Spine'];
+const POSE_BONES = ['RightArm', 'RightForeArm', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightUpLeg', 'RightLeg', 'LeftUpLeg', 'LeftLeg', 'Spine'];
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z).normalize();
 // les coups de pied : direction de chaque os (personnage qui regarde vers +z ; sa droite est vers -x)
 // (le sabre se lève en arrière pendant le coup de pied, pour bien voir la jambe)
@@ -294,6 +294,10 @@ export const KICK_POSES = {
   low: { ...SABER_BACK, RightUpLeg: V3(-0.35, -0.3, 0.89), RightLeg: V3(-0.25, -0.45, 0.86), LeftUpLeg: V3(0.15, -0.5, 0.85), LeftLeg: V3(0.1, -1, -0.35), Spine: V3(0, 0.8, 0.6) },
   spin: { ...SABER_BACK, RightUpLeg: V3(-0.45, 0.3, 0.84), RightLeg: V3(-0.4, 0.33, 0.85), Spine: V3(0.3, 0.88, -0.35) },
   fly: { ...SABER_BACK, RightUpLeg: V3(-0.15, -0.1, 1), RightLeg: V3(-0.1, -0.05, 1), LeftUpLeg: V3(0.1, -0.2, 0.95), LeftLeg: V3(0.1, -1, -0.2) },
+  // la Force : le bras gauche bien tendu devant, la main ouverte vers le haut (paume vers l'ennemi), le sabre levé derrière
+  force: { RightArm: V3(-0.7, 0.35, -0.6), RightForeArm: V3(-0.3, 0.9, -0.3), blade: V3(-0.15, 0.95, -0.3),
+    LeftArm: V3(0.22, 0.0, 1), LeftForeArm: V3(0.16, 0.06, 1), LeftHand: V3(0.05, 1, 0.12), Spine: V3(0, 0.92, 0.38),
+    RightUpLeg: V3(-0.1, -0.95, -0.35), LeftUpLeg: V3(0.1, -0.85, 0.5), LeftLeg: V3(0.05, -1, 0.05) },
 };
 
 export class Fighter {

@@ -46,6 +46,9 @@ function part(geo, color, x, y, z, o = {}) {
   return g;
 }
 
+// la main gauche de nos personnages 3D (pour le gaz de la Force)
+const findHand = (o) => o.getObjectByName('mixamorigLeftHand') || o.getObjectByName('mixamorig:LeftHand');
+
 export class VersusMode {
   constructor(ctx, opts = {}) {
     this.easy = Math.min(3, opts.easy || 0); // le joueur a déjà perdu : Dark Roteur va un peu moins vite
@@ -352,7 +355,7 @@ export class VersusMode {
   force(P) {
     const lucas = P === this.L, O = P.other;
     P.forceCool = FORCE_COOL;
-    P.state = 'attack'; P.move = { name: 'force', done: true }; P.f.guard = false;
+    P.state = 'attack'; P.move = { name: 'force', done: true, pose: 'force', noTrail: true }; P.f.guard = false;
     P.mt = P.f.play('spell', 1.5, 0.75); P.move.len = P.mt;
     sfx.deflate(); sfx.whoosh();
     this.banner(lucas ? 'LA FORCE DU PET !' : 'LA FORCE DU ROT !', 1.1, 'small');
@@ -582,7 +585,17 @@ export class VersusMode {
       if (M.spin) P.f.model.rotation.y = -P.face * Math.min(1, k / 0.6) * Math.PI * 2;
     } else if (P.f.pose) { P.f.pose = null; if (!P.flip) P.f.model.rotation.y = 0; }
     if (!SWM && !M && P.f.pose) P.f.pose = null;
-    if (P.f.footEnds(_a, _b)) P.footTrail.push(_a, _b, !!M);
+    if (P.f.footEnds(_a, _b)) P.footTrail.push(_a, _b, !!M && !M.noTrail);
+    // la Force : du gaz sort de la main tendue
+    if (M && M.name === 'force' && P.f.L) {
+      const hand = P.f.L.leftHand || (P.f.L.leftHand = findHand(P.f.L.lucas));
+      if (hand && Math.random() < 0.8) {
+        hand.getWorldPosition(_a);
+        const col = P === this.L ? 0x9be36b : 0xc38bff;
+        this.ctx.puffs.emit(_a.x, _a.y, _a.z, col, { vx: P.face * rand(5, 9), vy: rand(-0.5, 0.8), vz: rand(-0.5, 0.5), life: 0.45, s0: 0.35, s1: 1.1, drag: 2 });
+        this.ctx.glows.emit(_a.x, _a.y, _a.z, P === this.L ? 0xeaffc0 : 0xf3dcff, { life: 0.2, s0: 0.7, s1: 0.2 });
+      }
+    }
     // la pirouette : il tourne sur lui-même en arrière, roulé en boule
     if (P.flip) {
       P.flip.t += dt;
