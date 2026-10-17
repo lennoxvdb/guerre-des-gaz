@@ -8,7 +8,7 @@ import { makePlunger } from '../entities/plunger.js';
 import { makeStinkStar } from '../entities/etoile.js';
 import { sfx } from '../engine/audio.js';
 import { SR, SU, rand, clamp, pick, Script } from './common.js';
-import { makeWcFighter, makeRotFighter, makeFaucon, makePoop } from './trench.js';
+import { makeWcFighter, makeRotFighter, makeFaucon, makePoop, shieldHit } from './trench.js';
 
 export const ALT = 5;
 const beamGeo = new THREE.CapsuleGeometry(0.11, 0.9, 4, 8).rotateX(Math.PI / 2);
@@ -360,6 +360,7 @@ export class FlightMode {
     if (p.inv > 0 || this.result) return;
     p.hp -= 1; p.inv = 1.6;
     sfx.hurt(); this.ctx.shake(0.5);
+    if (this.chase) shieldHit();
     const w = this.wp(p.x, p.y);
     this.ctx.puffs.burst(w.x, w.y, w.z, 0xc38be8, 12, 4, { life: 0.8, s0: 0.6, s1: 1.6 });
     this.ctx.hud.hearts(Math.max(0, p.hp), p.maxHp);

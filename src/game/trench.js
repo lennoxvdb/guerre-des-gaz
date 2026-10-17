@@ -57,10 +57,12 @@ export function makePoop(size = 2.6) {
 // ---------- les vaisseaux en 3D ----------
 // le chasseur-WC : une cuvette volante avec son réservoir, sa lunette, et quatre ailes en X
 // ---------- notre chasseur-WC en vraie 3D (dessin Gemini → TRELLIS, assets/3d/chasseur.glb) ----------
-// Le réservoir devant, la bulle du cockpit et les 4 moteurs verts derrière (on les voit depuis la caméra).
+// Le réservoir devant, les 4 moteurs verts derrière (on les voit depuis la caméra).
+// Lucas est assis sur la lunette, protégé par une bulle verte transparente (un champ de force).
 // S'il ne charge pas, on garde l'ancien vaisseau fait de formes simples.
 const SHIP_K = 6.4; // le modèle fait 1 de large : on le met à la taille du jeu
-const DOME = { y: -0.075, z: 0.285, r: 0.135 }; // la bulle du cockpit (dans le modèle)
+const DOME = { y: -0.14, top: 0.025, z: 0.2 }; // la bulle peinte du cockpit (dans le modèle) : on l'enlève
+const SEAT = { y: 0.055, z: 0.045 }; // le dessus de la lunette, là où Lucas s'assoit
 let SHIP = null;
 export async function loadShip() {
   try {
@@ -69,9 +71,9 @@ export async function loadShip() {
     gl.scene.updateMatrixWorld(true);
     gl.scene.traverse((o) => { if (o.isMesh) mesh = o; });
     const geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
-    // on enlève la bulle peinte (pas transparente) : une vraie bulle de verre la remplace, avec Lucas dedans
+    // on enlève la petite bulle peinte du cockpit (et son socle) : Lucas est assis sur la lunette
     const pos = geo.attributes.position, idx = geo.index.array, keep = [];
-    const inDome = (i) => pos.getZ(i) > 0.215 && pos.getY(i) > DOME.y && Math.abs(pos.getX(i)) < 0.15;
+    const inDome = (i) => pos.getZ(i) > DOME.z && pos.getY(i) > DOME.y && pos.getY(i) < DOME.top && Math.abs(pos.getX(i)) < 0.16;
     for (let t = 0; t < idx.length; t += 3) if (!(inDome(idx[t]) && inDome(idx[t + 1]) && inDome(idx[t + 2]))) keep.push(idx[t], idx[t + 1], idx[t + 2]);
     geo.setIndex(keep);
     geo.scale(SHIP_K, SHIP_K, SHIP_K);
@@ -80,27 +82,50 @@ export async function loadShip() {
     if (map) map.colorSpace = THREE.SRGBColorSpace;
     const outline = outlineGeo(geo, 0.05);
     geo.userData.keep = outline.userData.keep = true;
-    SHIP = { geo, outline, mat: new THREE.MeshToonMaterial({ map, gradientMap: gradMap }) };
+    SHIP = { geo, outline, mat: new THREE.MeshToonMaterial({ map, gradientMap: gradMap, side: THREE.DoubleSide }) }; // les deux faces : pas de trou là où était la bulle
   } catch (e) { console.warn('chasseur-WC 3D introuvable, on garde l\'ancien', e); }
 }
-const glassGeo = new THREE.SphereGeometry(1, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2);
-glassGeo.userData.keep = true;
-const glassMat = new THREE.MeshBasicMaterial({ color: 0xbfeeff, transparent: true, opacity: 0.22, depthWrite: false });
+// le champ de force : une bulle verte transparente, plus lumineuse sur les bords, avec des vagues qui montent
+const shieldGeo = new THREE.SphereGeometry(1, 32, 20);
+shieldGeo.userData.keep = true;
+const shieldU = { uTime: { value: 0 }, uHit: { value: 0 } };
+const shieldMat = new THREE.ShaderMaterial({
+  uniforms: shieldU, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP;
+    void main() { vP = position; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+  fragmentShader: `uniform float uTime; uniform float uHit; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+    void main() {
+      float rim = pow(1.0 - abs(dot(vN, vV)), 2.2);
+      float wave = 0.5 + 0.5 * sin(vP.y * 14.0 - uTime * 5.0);
+      float a = 0.05 + rim * 0.75 + wave * 0.06 + uHit * 0.5;
+      vec3 c = mix(vec3(0.25, 1.0, 0.15), vec3(0.75, 1.0, 0.55), rim * 0.35 + uHit * 0.6);
+      gl_FragColor = vec4(c * a, a);
+    }`,
+});
+let shieldClock = 0;
+function tickShield() { // une fois par image (appelé par le vaisseau quand il est dessiné)
+  const now = performance.now() / 1000, dt = Math.min(0.1, now - (shieldClock || now));
+  shieldClock = now;
+  shieldU.uTime.value = now % 1000;
+  shieldU.uHit.value = Math.max(0, shieldU.uHit.value - dt * 2.5);
+}
+export const shieldHit = () => { shieldU.uHit.value = 1; }; // le champ de force s'allume quand on est touché
 function makeShip3D() {
   const g = new THREE.Group(), K = SHIP_K;
   const body = new THREE.Mesh(SHIP.geo, SHIP.mat); body.castShadow = true;
   g.add(body, new THREE.Mesh(SHIP.outline, outlineMat));
-  const glass = new THREE.Mesh(glassGeo, glassMat);
-  glass.scale.setScalar(DOME.r * K); glass.position.set(0, DOME.y * K, DOME.z * K); glass.renderOrder = 2;
-  g.add(glass);
+  const shield = new THREE.Mesh(shieldGeo, shieldMat);
+  shield.scale.set(1.75, 1.85, 1.75); shield.position.set(0, SEAT.y * K + 0.95, SEAT.z * K + 0.35); shield.renderOrder = 3;
+  shield.onBeforeRender = tickShield;
+  g.add(shield);
   // les flammes vertes au bout des 4 moteurs
   for (const [x, y, z] of [[-0.445, -0.15, 0.095], [0.445, -0.15, 0.095], [-0.445, 0.148, 0.03], [0.445, 0.148, 0.03]]) {
     const fire = glowSprite(0x7dff4a, 1.5, 0.9); fire.position.set(x * K, y * K, z * K); g.add(fire);
   }
-  // Lucas assis dans la bulle, il regarde devant (vers le réservoir)
-  const lucas = new Fighter('lucas', 1.05);
+  // Lucas assis sur la lunette comme sur de vrais WC : le dos au réservoir, il nous regarde
+  const lucas = new Fighter('lucas', 2.1);
   lucas.setBase('sit'); lucas.setSaberOn(0);
-  lucas.yaw = Math.PI; lucas.root.position.set(0, DOME.y * K - 0.22, DOME.z * K + 0.05);
+  lucas.yaw = 0; lucas.root.position.set(0, SEAT.y * K - 0.62, SEAT.z * K + 0.88); // ses fesses (hanches) pile sur la lunette
   lucas.update(0.01);
   g.add(lucas.root);
   g.userData.lucas = lucas;
@@ -306,7 +331,7 @@ export class TrenchMode {
     const p = this.ship;
     if (p.inv > 0 || this.result || this.won) return;
     p.hp -= 1; p.inv = 1.5;
-    sfx.hurt(); this.shakeT = 0.4; this.ctx.flash(0.25);
+    sfx.hurt(); this.shakeT = 0.4; this.ctx.flash(0.25); shieldHit();
     this.ctx.puffs.burst(this.obj.position.x, this.obj.position.y, this.obj.position.z, 0xc38be8, 12, 4, { life: 0.8, s0: 0.6, s1: 1.6 });
     this.ctx.hud.hearts(Math.max(0, p.hp), p.maxHp);
     if (p.hp <= 0 && !this.revived) { // une deuxième chance, une seule fois
