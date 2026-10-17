@@ -13,6 +13,14 @@ const BUB_GEO = new THREE.SphereGeometry(1.6, 20, 14), RIM_GEO = new THREE.Spher
 BUB_GEO.userData.keep = RIM_GEO.userData.keep = true;
 const BUB_MAT = new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.28, depthWrite: false });
 const RIM_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, side: THREE.BackSide, depthWrite: false });
+// le décor qui cache Lucas devient transparent (une copie transparente de chaque matière, faite une seule fois)
+const FADE_MATS = new Map();
+function fadeMat(m) {
+  let f = FADE_MATS.get(m);
+  if (!f) { f = m.clone(); f.transparent = true; f.opacity = 0.28; f.depthWrite = false; FADE_MATS.set(m, f); }
+  return f;
+}
+const _ray = new THREE.Raycaster(), _ndc = new THREE.Vector2();
 
 export class FootMode {
   constructor(ctx, opts) {
@@ -1016,6 +1024,7 @@ export class FootMode {
     this.camPos.lerp(h.pos, Math.min(1, dt * 5));
     this.ctx.cam.target.copy(this.camPos).setY(1);
     if (this.cam3) this.placeCinema(dt);
+    this.seeThrough(dt);
     this.world.follow(h.pos);
     return this.result;
   }
@@ -1033,7 +1042,47 @@ export class FootMode {
     cam.fov = a < 1 ? 62 : 50; cam.aspect = a; cam.updateProjectionMatrix();
   }
 
+  // un bâtiment, un arbre ou une tour entre la caméra et Lucas devient transparent : on voit toujours Lucas
+  seeThrough(dt) {
+    const cam = this.cam3 || this.ctx.camera, h = this.hero;
+    if (!this.faded) this.faded = new Map();
+    this.seeT = (this.seeT || 0) - dt;
+    if (this.seeT <= 0) {
+      this.seeT = 0.1;
+      const hidden = new Set();
+      // le décor, et les générateurs de la cité des nuages
+      const cands = [...this.world.group.children];
+      for (const e of this.enemies) if (e.kind === 'gen' && !e.dead) cands.push(e.g);
+      const roots = new Set(cands);
+      for (const up of [0.9, 1.9]) {
+        _a.copy(h.f.root.position).setY(h.f.root.position.y + up);
+        _b.copy(_a).project(cam);
+        _ndc.set(_b.x, _b.y);
+        _ray.setFromCamera(_ndc, cam);
+        const far = _ray.ray.origin.distanceTo(_a) - 0.6;
+        for (const hit of _ray.intersectObjects(cands, true)) {
+          if (hit.distance > far) break;
+          if (!hit.object.isMesh || hit.object === this.world.ground) continue;
+          let top = hit.object;
+          while (top && !roots.has(top)) top = top.parent;
+          if (top) hidden.add(top);
+        }
+      }
+      for (const o of hidden) {
+        if (!this.faded.has(o)) o.traverse((m) => { if (m.isMesh) { m.userData.solid = m.material; m.material = fadeMat(m.material); } });
+        this.faded.set(o, 0.35); // il reste transparent un petit moment (pas de clignotement)
+      }
+    }
+    for (const [o, t] of this.faded) {
+      const left = t - dt;
+      if (left > 0) { this.faded.set(o, left); continue; }
+      o.traverse((m) => { if (m.isMesh && m.userData.solid) { m.material = m.userData.solid; m.userData.solid = null; } });
+      this.faded.delete(o);
+    }
+  }
+
   dispose() {
+    if (this.faded) for (const o of this.faded.keys()) o.traverse((m) => { if (m.isMesh && m.userData.solid) { m.material = m.userData.solid; m.userData.solid = null; } });
     if (this.cam3) this.scene.fog = this.oldFog || null;
     for (const e of this.enemies) { if (e.g) this.scene.remove(e.g); if (e.f) this.scene.remove(e.f.root); if (e.arc) this.scene.remove(e.arc); if (e.trail) e.trail.dispose(this.scene); if (e.shadow) this.scene.remove(e.shadow); if (e.thrown) this.scene.remove(e.thrown.s); if (e.warnD) this.scene.remove(e.warnD); }
     for (const b of this.bolts) this.scene.remove(b.g);
